@@ -9,7 +9,7 @@ import numpy as np
 from apcn_v07.generator import GroundedEpisode, ProceduralTeacher
 from apcn_v07.curriculum import CurriculumEngine, CurriculumState
 from apcn_v07.trainer import evaluate, EvaluationReport
-from .learner import EnhancedConceptLearner
+from .learner_v082 import CalibratedConceptLearner
 
 
 @dataclass
@@ -24,10 +24,10 @@ class StepResult:
 
 
 class TrainingSessionV08:
-    def __init__(self, seed: int = 8, learner: Optional[EnhancedConceptLearner] = None):
+    def __init__(self, seed: int = 8, learner: Optional[CalibratedConceptLearner] = None):
         self.seed = seed
         self.teacher = ProceduralTeacher(seed=seed)
-        self.learner = learner or EnhancedConceptLearner()
+        self.learner = learner or CalibratedConceptLearner()
         self.curriculum = CurriculumEngine(self.teacher, self.learner, seed=seed + 101)
         self.curriculum.index = self.learner.episode_count
         self.phase_counts: Dict[str, int] = {}
@@ -47,10 +47,20 @@ class TrainingSessionV08:
         self,
         color: Optional[str] = None,
         shape: Optional[str] = None,
-        difficulty: float = 0.65,
-        add_distractors: bool = True,
+        difficulty: float = 0.18,
+        add_distractors: bool = False,
     ) -> StepResult:
-        ep = self.teacher.generate(color=color, shape=shape, difficulty=difficulty, add_distractors=add_distractors)
+        """Generate a prediction-only example.
+
+        Defaults are deliberately clean so the user can visually verify what the
+        teacher generated. Hard/noisy evaluation belongs in the Testing Ground.
+        """
+        ep = self.teacher.generate(
+            color=color,
+            shape=shape,
+            difficulty=difficulty,
+            add_distractors=add_distractors,
+        )
         x = self.learner.sensor.extract(ep.image, ep.attention_mask)
         pc, pcs = self.learner.best_of(self.teacher.color_words, x)
         ps, pss = self.learner.best_of(self.teacher.shape_words, x)
@@ -74,6 +84,7 @@ class TrainingSessionV08:
         memory = output / "concept_memory_v0_8.json"
         self.learner.save(memory)
         (output / "session_v0_8.json").write_text(json.dumps({
+            "version": "0.8.2",
             "seed": self.seed,
             "episode_count": self.learner.episode_count,
             "phase_counts": self.phase_counts,
@@ -83,5 +94,7 @@ class TrainingSessionV08:
 
     @classmethod
     def load(cls, path: str | Path, seed: int = 8) -> "TrainingSessionV08":
-        learner = EnhancedConceptLearner.load(path)
+        # CalibratedConceptLearner.load intentionally accepts older 23-D V0.7/
+        # V0.8 memories, so existing learned episodes are preserved.
+        learner = CalibratedConceptLearner.load(path)
         return cls(seed=seed, learner=learner)
