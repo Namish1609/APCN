@@ -1,6 +1,6 @@
-# APCN V0.8.2 — Grounded Concept Studio
+# APCN V0.9 — Grounded Semantic Language Studio
 
-V0.8.2 fixes the misleading black attention-box rendering bug, restores live APCN concept/feature firing, improves shape candidate calibration, and adds a separate bulk Testing Ground with scoring and confusion matrices.
+V0.9 keeps the V0.8.2 perceptual grounding system and adds the first contextual semantic-language layer: utterances are learned as mappings into language-independent semantic programs rather than as bags of visual words.
 
 ## Update and run
 
@@ -10,67 +10,78 @@ git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_8.py
+python run_desktop_v0_9.py
 ```
 
-If dependencies are not installed yet:
+The UI remains designed for **1366×768**.
+
+## What V0.9 adds
+
+- grounded binary relations
+- statement / question / command intent (`ASSERT`, `QUERY`, `GOAL`)
+- entity composition from learned properties/categories
+- conjunction / grouping (`and`-like cues)
+- sequence (`then`-like cues)
+- negation
+- contextual/pronoun reference to a salient entity
+- arbitrary-vocabulary tests to verify that literal English strings are not required
+- compact persistent semantic cue statistics
+- separate perception and semantic-language testing
+
+## Testing Ground UI change
+
+The redundant score cards have been removed.
+
+The Testing Ground now has:
+
+```text
+┌───────────────────────────────────────────────┐
+│ confusion matrix       confusion matrix      │
+├───────────────────────┬───────────────────────┤
+│ FAILURES              │ GRAPHS                │
+│ exact failed examples │ accuracy vs episodes  │
+└───────────────────────┴───────────────────────┘
+```
+
+The graph stores benchmark history, so you can test at 400, 800, 1200, 1600, 2200… learned experiences and see whether learning is actually improving. Tests are read-only and show the learner episode count before and after.
+
+## Recommended language curriculum
+
+```text
+0–399       lexical relations
+400–799     statement / question / command intent
+800–1199    composition + conjunction
+1200–1599   sequence + negation
+1600+       mixed language + contextual reference
+```
+
+Start with:
+
+```text
+Language + Context → Auto Train Language Batch → 800
+Testing Ground → Language semantics → Run Test
+```
+
+Then continue to roughly 1600 and 2200+ and test again. Each result becomes another point on the graph.
+
+## CLI language training
 
 ```bash
-chmod +x install_linux.sh
-./install_linux.sh
-source .venv/bin/activate
+python train_language_v0_9.py --episodes 2600 --test-samples 500
 ```
 
-## Train tab
-
-The main workflow has three actions:
-
-1. **New / Test Example** — clean prediction-only example; memory does not change.
-2. **Teach Visible Example** — learns that exact visible image + sentence once.
-3. **Auto Train** — procedural curriculum; every generated episode updates memory.
-
-The Learn/Train preview is intentionally clean. Automatic training can still use background, lighting, position, blur and clutter variation internally.
-
-## Testing Ground
-
-The new dedicated Testing Ground is read-only. It reports:
-
-- color accuracy
-- shape accuracy
-- joint accuracy
-- color confusion matrix
-- shape confusion matrix
-- per-class recall
-- representative failure cases
-
-Choose Clean, Normal, Hard or Stress difficulty and run 100–10,000 balanced samples. The UI shows the episode count before and after the test so you can verify memory was not changed.
-
-## Shape-learning improvement
-
-Previous versions compared words such as `circle`, `square`, `ellipse` and `rectangle` using independently selected feature subsets, which made the resulting scores poorly calibrated. V0.8.2 computes one shared discriminative subspace for all candidates in the comparison and scores every candidate on the same dimensions.
-
-This preserves the existing 23-dimensional memory format, so earlier V0.7/V0.8/V0.8.1 memories can still be loaded.
-
-## Firing display
-
-The Train tab again shows a live APCN firing graph connecting active words/concepts/families to sensory feature nodes. These are concept-graph activations, not neural-network neurons.
-
-## Original dense V0.8 UI
+Re-test a saved semantic memory:
 
 ```bash
-python run_desktop_v0_8.py --classic
+python test_language_v0_9.py outputs/v0_9/semantic_memory_v0_9.json --samples 500
 ```
 
-## Headless training
-
-```bash
-python train_concepts_v0_8.py --episodes 2400 --eval-samples 400
-```
-
-## Tests
+## Validation
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Full V0.8.2 notes: `README_V0_8_2.md`.
+The V0.9 semantic regression suite passes 7/7 tests locally. A deterministic controlled synthetic benchmark reached 100% exact semantic-program accuracy by ~2200 curriculum steps on the training grammar. This is a controlled synthetic result, not open-domain English understanding. The held-out-template benchmark is materially harder and remains an explicit target for the next construction-learning work.
+
+Full technical notes: `README_V0_9.md`.
