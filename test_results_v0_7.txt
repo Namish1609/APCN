@@ -1,0 +1,12 @@
+test_color_word_selects_channel_subspace (test_v0_7.APCNV07Tests.test_color_word_selects_channel_subspace) ... ok
+test_compact_persistence (test_v0_7.APCNV07Tests.test_compact_persistence) ... ok
+test_function_word_is_not_strong_visual_concept (test_v0_7.APCNV07Tests.test_function_word_is_not_strong_visual_concept) ... ok
+test_held_out_generalization (test_v0_7.APCNV07Tests.test_held_out_generalization) ... ok
+test_memory_is_sufficient_statistics_not_episode_archive (test_v0_7.APCNV07Tests.test_memory_is_sufficient_statistics_not_episode_archive) ... ok
+test_shape_word_selects_geometry_subspace (test_v0_7.APCNV07Tests.test_shape_word_selects_geometry_subspace) ... ok
+test_words_are_not_hardwired_to_feature_names (test_v0_7.APCNV07Tests.test_words_are_not_hardwired_to_feature_names) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 6.283s
+
+OK
