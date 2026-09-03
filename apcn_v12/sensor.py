@@ -21,26 +21,30 @@ class SelfOrganizingPatchSensor:
     circularity, fill ratio or aspect ratio as semantic-style summary features.
 
     Inductive biases remain explicit: joint-attention masks, translation/scale
-    normalization, a coarse pose normalization, local patches and a spatial
-    histogram. V0.12 therefore tests *less handcrafted* perception; it is not a
-    claim of learning vision from literally zero prior structure.
+    normalization, coarse pose normalization, local patches, brightness-normalized
+    channel relationships and spatial histograms. V0.12 therefore tests *less
+    handcrafted* perception; it is not a claim of learning vision from literally
+    zero prior structure.
     """
 
     VERSION = "APCN-V0.12-SELF-ORGANIZING-PATCH-SENSOR"
 
     def __init__(self, normalized_size: int = 32, raster_size: int = 10,
-                 histogram_bins: int = 8, max_codewords: int = 24,
-                 novelty_threshold: float = 0.24):
+                 histogram_bins: int = 8, chromatic_bins: int = 6,
+                 max_codewords: int = 24, novelty_threshold: float = 0.24):
         self.normalized_size = int(normalized_size)
         self.raster_size = int(raster_size)
         self.histogram_bins = int(histogram_bins)
+        self.chromatic_bins = int(chromatic_bins)
         self.max_codewords = int(max_codewords)
         self.novelty_threshold = float(novelty_threshold)
         self.codewords: List[np.ndarray] = []
         self.codeword_counts: List[int] = []
         self.patch_updates = 0
 
-        a = 3 * self.histogram_bins
+        # Raw channel distributions + a generic 2-D normalized channel-ratio
+        # histogram. There are no named hue/orange/yellow bins.
+        a = 3 * self.histogram_bins + self.chromatic_bins * self.chromatic_bins
         b = a + self.raster_size * self.raster_size
         c = b + 5 * self.max_codewords
         self.layout = FeatureLayout(c, {
@@ -182,6 +186,22 @@ class SelfOrganizingPatchSensor:
             hist = hist.astype(np.float64)
             hist /= max(float(hist.sum()), 1.0)
             hist_parts.append(hist)
+
+        # Generic chromaticity: retain cross-channel relationships while reducing
+        # sensitivity to overall brightness. B and G ratios determine the third
+        # channel ratio because the three sum to one. Nothing here knows colors.
+        pixf = pix.astype(np.float64) + 1e-3
+        sums = np.maximum(pixf.sum(axis=1), 1e-8)
+        c0 = pixf[:, 0] / sums
+        c1 = pixf[:, 1] / sums
+        joint, _, _ = np.histogram2d(
+            c0, c1,
+            bins=(self.chromatic_bins, self.chromatic_bins),
+            range=((0.0, 1.0), (0.0, 1.0)),
+        )
+        joint = joint.astype(np.float64)
+        joint /= max(float(joint.sum()), 1.0)
+        hist_parts.append(joint.reshape(-1))
         pixel_hist = np.concatenate(hist_parts)
 
         raster = cv2.resize(norm_m, (self.raster_size, self.raster_size),
@@ -221,6 +241,7 @@ class SelfOrganizingPatchSensor:
             "normalized_size": self.normalized_size,
             "raster_size": self.raster_size,
             "histogram_bins": self.histogram_bins,
+            "chromatic_bins": self.chromatic_bins,
             "max_codewords": self.max_codewords,
             "novelty_threshold": self.novelty_threshold,
             "patch_updates": self.patch_updates,
@@ -234,6 +255,7 @@ class SelfOrganizingPatchSensor:
             normalized_size=int(data.get("normalized_size", 32)),
             raster_size=int(data.get("raster_size", 10)),
             histogram_bins=int(data.get("histogram_bins", 8)),
+            chromatic_bins=int(data.get("chromatic_bins", 6)),
             max_codewords=int(data.get("max_codewords", 24)),
             novelty_threshold=float(data.get("novelty_threshold", .24)),
         )
