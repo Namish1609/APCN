@@ -127,6 +127,16 @@ class TestV012(unittest.TestCase):
         self.assertIn('self.session.save("outputs/v0_12")', text)
         self.assertNotIn("addTab(self._representation", text)
 
+    def test_v012_release_metadata_and_launcher(self):
+        version = Path("VERSION").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        launcher = Path("run_desktop_v0_12.py").read_text(encoding="utf-8")
+        workflow = Path(".github/workflows/tests.yml").read_text(encoding="utf-8")
+        self.assertIn("0.12.0", version)
+        self.assertIn("APCN V0.12", readme)
+        self.assertIn("apcn_v12.ui", launcher)
+        self.assertIn("validate_v0_12.py", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
