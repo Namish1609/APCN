@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import json
 import math
 
@@ -22,13 +22,7 @@ class ErrorSignature:
 
 
 class ErrorMemory:
-    """Aggregate failure memory.
-
-    It intentionally does not archive every failed image/sentence. Repeated
-    mistakes are collapsed into signatures such as rectangle->ellipse or
-    ASSERT->GOAL. A small bounded set of representative strings may be kept for
-    diagnostics, but learning priority is derived from aggregate evidence.
-    """
+    """Aggregate failure memory with bounded diagnostic representatives."""
 
     VERSION = "APCN-V0.11-ERROR-MEMORY"
 
@@ -71,16 +65,39 @@ class ErrorMemory:
             if ts and ps and ts != ps:
                 self.record("visual_shape", ts, ps)
 
+    @staticmethod
+    def _program_path(text: str) -> str:
+        """Compact outer semantic path, e.g. NEGATE>ASSERT or GOAL."""
+        lines = [x.strip() for x in str(text).splitlines() if x.strip()]
+        if not lines:
+            return "NONE"
+        ops = {"ASSERT", "QUERY", "GOAL", "NEGATE", "GROUP", "SEQUENCE"}
+        path = []
+        for line in lines[:4]:
+            head = line.split("(", 1)[0].strip()
+            if head in ops:
+                path.append(head)
+            else:
+                break
+        return ">".join(path) if path else lines[0]
+
     def record_language_report(self, report) -> None:
         for f in getattr(report, "failures", []):
             expected = str(getattr(f, "expected", ""))
             predicted = str(getattr(f, "predicted", ""))
             utterance = str(getattr(f, "utterance", ""))
             skill = str(getattr(f, "skill", "language"))
-            # First program line carries ASSERT/QUERY/GOAL/NEGATE/GROUP/etc.
-            e0 = expected.strip().splitlines()[0] if expected.strip() else "NONE"
-            p0 = predicted.strip().splitlines()[0] if predicted.strip() else "NONE"
-            self.record("language_program", e0, p0, context=skill, representative=utterance)
+            epath = self._program_path(expected)
+            ppath = self._program_path(predicted)
+            if epath != ppath:
+                self.record("language_program", epath, ppath, context=skill, representative=utterance)
+            elif expected.strip() != predicted.strip():
+                # Outer operator was correct but some semantic content/identity
+                # was not. Keep this separate from intent/operator mistakes.
+                domain = "language_reference" if skill == "reference" else "language_semantics"
+                truth = "correct_entity_identity" if skill == "reference" else "expected_semantics"
+                pred = "wrong_or_missing_entity" if skill == "reference" else "mismatched_semantics"
+                self.record(domain, truth, pred, context=skill, representative=utterance)
 
     def top(self, domain: Optional[str] = None, limit: int = 12) -> List[ErrorSignature]:
         rows = [s for s in self.signatures.values() if domain is None or s.domain == domain]
