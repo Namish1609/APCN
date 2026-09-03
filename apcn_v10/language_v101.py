@@ -11,71 +11,109 @@ from .definitions import ConceptStore, DefinitionCurriculum
 
 
 class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
+    """V0.10.1 semantic-language patch.
+
+    Intent is inferred from learned construction evidence rather than literal
+    English keys. V0.10.1 also lets punctuation become a learned structural
+    cue: if question-mark-bearing demonstrations consistently have one intent,
+    the learner can acquire that association statistically.
+    """
+
     VERSION = "APCN-V0.10.1-SEMANTIC-LANGUAGE-MEMORY"
+    QUESTION_CUE = "__surface_question_mark__"
+
+    def __init__(self):
+        super().__init__()
+        self._surface_question = False
+
+    def observe(self, episode) -> None:
+        super().observe(episode)
+        # The base tokenizer intentionally strips punctuation. In V0.10.1 we
+        # retain a generic surface-event cue for '?'. It is NOT mapped to QUERY
+        # by code: its semantic association is accumulated from demonstrations.
+        if "?" in episode.utterance:
+            cue = self.QUESTION_CUE
+            self.cue_totals[cue] += 1
+            pkey = f"{cue}@start"
+            self.pos_totals[pkey] += 1
+            features = set(episode.program.features())
+            if episode.discourse_focus is not None:
+                features.add(self.reference_feature)
+            for feature in features:
+                self.cue_feature[cue][feature] += 1
+                self.pos_feature[pkey][feature] += 1
+
+    def _learned_question_intent(self) -> Optional[str]:
+        cue = self.QUESTION_CUE
+        candidates = []
+        for feat in self.feature_totals:
+            if not feat.startswith("intent:"):
+                continue
+            support = self.cue_support(cue, feat)
+            if support < 5:
+                continue
+            purity = self.feature_purity(cue, feat)
+            score = self.cue_score(cue, feat, "start")
+            if score > 0:
+                candidates.append((score * (0.5 + 0.5 * purity), purity, support, feat))
+        candidates.sort(reverse=True)
+        if not candidates:
+            return None
+        top = candidates[0]
+        second = candidates[1][0] if len(candidates) > 1 else 0.0
+        if top[1] >= 0.72 and top[2] >= 5 and top[0] >= second * 1.10:
+            return top[3].split(":", 1)[1]
+        return None
 
     def _best_intent(self, tokens: Sequence[str]) -> str:
-        if not tokens:
-            return "ASSERT"
+        if self._surface_question:
+            learned = self._learned_question_intent()
+            if learned is not None:
+                return learned
+
         intent_features = [f for f in self.feature_totals if f.startswith("intent:")]
-        if not intent_features:
+        if not tokens or not intent_features:
             return "ASSERT"
-        prefix_candidates = []
-        max_n = min(5, len(tokens))
-        for n in range(1, max_n + 1):
+
+        # Prefer a compact learned construction beginning at clause start.
+        # Longer, purer constructions dominate generic words such as "the".
+        candidates = []
+        for n in range(1, min(5, len(tokens)) + 1):
             cue = " ".join(tokens[:n])
-            scores = []
+            scored = []
             for feat in intent_features:
                 support = self.cue_support(cue, feat)
-                if support < 4:
+                if support < 5:
                     continue
                 purity = self.feature_purity(cue, feat)
                 score = self.cue_score(cue, feat, "start")
                 if score <= 0:
                     continue
-                value = score * (0.55 + 0.65 * purity) * (1.0 + 0.16 * (n - 1))
-                scores.append((value, purity, support, feat))
-            scores.sort(reverse=True)
-            if scores:
-                top = scores[0]
-                second = scores[1][0] if len(scores) > 1 else 0.0
+                value = score * (0.45 + 0.75 * purity) * (1.0 + 0.18 * (n - 1))
+                scored.append((value, purity, support, feat))
+            scored.sort(reverse=True)
+            if scored:
+                top = scored[0]
+                second = scored[1][0] if len(scored) > 1 else 0.0
                 margin = top[0] / max(second, 1e-9)
-                prefix_candidates.append((top[0], top[1], margin, n, top[2], top[3]))
-        prefix_candidates.sort(reverse=True)
-        for value, purity, margin, n, support, feat in prefix_candidates:
-            if purity >= 0.64 and support >= 5 and margin >= 1.12 and value >= 0.10:
+                candidates.append((top[0], top[1], margin, n, top[2], top[3]))
+        candidates.sort(reverse=True)
+        for value, purity, margin, n, support, feat in candidates:
+            # A command construction normally has a strong, pure clause-start
+            # cue. Assertions often lack one; in that case ASSERT is safer than
+            # summing many weak correlations and hallucinating GOAL.
+            if purity >= 0.68 and support >= 6 and margin >= 1.10 and value >= 0.10:
                 return feat.split(":", 1)[1]
 
-        totals: Dict[str, float] = defaultdict(float)
-        best_per_feature: Dict[str, list] = defaultdict(list)
-        n_tok = max(1, len(tokens))
-        for n in range(1, min(5, len(tokens)) + 1):
-            for i in range(len(tokens) - n + 1):
-                cue = " ".join(tokens[i:i+n])
-                center = (i + (n - 1) / 2.0) / max(1, n_tok - 1)
-                pos = self._bucket(center)
-                for feat in intent_features:
-                    support = self.cue_support(cue, feat)
-                    if support < 5:
-                        continue
-                    purity = self.feature_purity(cue, feat)
-                    score = self.cue_score(cue, feat, pos)
-                    if score <= 0.035 or purity < 0.38:
-                        continue
-                    weight = score * (0.45 + 0.55 * purity) * (1.0 + 0.08 * (n - 1))
-                    if i == 0:
-                        weight *= 1.25
-                    best_per_feature[feat].append(weight)
-        for feat, vals in best_per_feature.items():
-            vals.sort(reverse=True)
-            totals[feat] = sum(vals[:4])
-        if not totals:
-            return "ASSERT"
-        ordered = sorted(((v, k) for k, v in totals.items()), reverse=True)
-        if ordered[0][0] < 0.10:
-            return "ASSERT"
-        if len(ordered) > 1 and ordered[0][0] < ordered[1][0] * 1.06:
-            return "ASSERT"
-        return ordered[0][1].split(":", 1)[1]
+        return "ASSERT"
+
+    def parse(self, utterance: str, discourse_focus=None, allow_sequence: bool = True):
+        previous = self._surface_question
+        self._surface_question = "?" in utterance
+        try:
+            return super().parse(utterance, discourse_focus, allow_sequence)
+        finally:
+            self._surface_question = previous
 
 
 class AdaptiveLanguageSessionV101(AdaptiveLanguageSession):
