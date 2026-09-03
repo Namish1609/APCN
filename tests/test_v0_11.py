@@ -9,7 +9,10 @@ from apcn_v11.error_memory import ErrorMemory
 from apcn_v11.consolidation import ConsolidationEngine
 from apcn_v11.visual import PrototypeConceptLearner
 from apcn_v11.language import SemanticLanguageLearnerV11
+from apcn_v11.discourse import DiscourseEntityRegistry
+from apcn_v11.language_teacher import RichSemanticTeacherV11
 from apcn_v10.language_teacher import RichSemanticTeacher
+from apcn_v10.semantic import EntityRef, SemanticNode
 from apcn_v10.definitions import ConceptStore
 
 
@@ -34,8 +37,6 @@ class TestV011(unittest.TestCase):
     def test_construction_inducer_learns_abstract_patterns(self):
         learner = SemanticLanguageLearnerV11()
         teacher = RichSemanticTeacher(seed=111)
-        # Balanced experiences establish lexical grounding and recurring
-        # sentence constructions without hardcoding intent phrases in learner.
         for i in range(900):
             intent = ("ASSERT", "QUERY", "GOAL")[i % 3]
             learner.observe(teacher.simple(intent=intent, held_out=False, skill="intent"))
@@ -46,7 +47,6 @@ class TestV011(unittest.TestCase):
 
     def test_unified_graph_bridges_shared_lexical_evidence(self):
         graph = UnifiedConceptGraph()
-        # Small fake interfaces keep this test about graph semantics.
         class Stats:
             count = 20
         class Visual:
@@ -63,6 +63,20 @@ class TestV011(unittest.TestCase):
         bridges = [e for e in graph.edges.values() if e.relation == "SAME_CONCEPT_HYPOTHESIS"]
         self.assertTrue(bridges)
         self.assertGreater(bridges[0].weight, .7)
+
+    def test_graph_sync_is_idempotent_view_not_learning_event(self):
+        graph = UnifiedConceptGraph()
+        class Stats:
+            count = 10
+        class Visual:
+            token_stats = {"yellow": Stats()}
+            def concept_quality(self, token): return .7
+            def discover_families(self): return []
+        graph.sync(visual=Visual())
+        first = {(e.src, e.dst, e.relation): (e.weight, e.support) for e in graph.edges.values()}
+        graph.sync(visual=Visual())
+        second = {(e.src, e.dst, e.relation): (e.weight, e.support) for e in graph.edges.values()}
+        self.assertEqual(first, second)
 
     def test_definition_dependencies_enter_unified_graph(self):
         store = ConceptStore()
@@ -82,12 +96,43 @@ class TestV011(unittest.TestCase):
         self.assertEqual(rows[0].target, "rectangle")
         self.assertEqual(rows[0].contrast, "ellipse")
 
+    def test_discourse_registry_tracks_focus_and_new_instance_identity(self):
+        reg = DiscourseEntityRegistry()
+        a = reg.new_entity("C4", "S3", role="subject", focus=True)
+        b = reg.new_entity("C1", "S0", role="object")
+        self.assertEqual(a.instance, 0)
+        self.assertEqual(b.instance, 1)
+        rel = SemanticNode.relation_node("R0", a, b, "GOAL")
+        reg.ingest(rel)
+        self.assertEqual(reg.resolve_reference().instance, 0)
+        c = reg.resolve_description("C3", "S2", prefer_existing=True)
+        self.assertIsNotNone(c)
+        self.assertEqual(c.instance, 2)
+        self.assertEqual(reg.summary()["entity_count"], 3)
+
+    def test_reference_teacher_avoids_ambiguous_duplicate_target(self):
+        teacher = RichSemanticTeacherV11(seed=1101)
+        for _ in range(40):
+            first, second = teacher.reference_pair(held_out=True)
+            a = first.program.atom(); b = second.program.atom()
+            self.assertIsNotNone(a); self.assertIsNotNone(b)
+            previous = {(a.subject.color, a.subject.shape), (a.object.color, a.object.shape)}
+            self.assertNotIn((b.object.color, b.object.shape), previous)
+            self.assertEqual(b.object.instance, 2)
+
     def test_graph_persistence(self):
         g = UnifiedConceptGraph(); g.upsert_node("concept:x", "x", "concept", confidence=.7); g.upsert_node("concept:y", "y", "concept"); g.strengthen("concept:x", "concept:y", "DEPENDS_ON", .9, 2)
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "graph.json"; g.save(p); r = UnifiedConceptGraph.load(p)
         self.assertIn("concept:x", r.nodes)
         self.assertEqual(len(r.neighbors("concept:x", "DEPENDS_ON")), 1)
+
+    def test_v011_ui_contains_consolidation_and_migration_controls(self):
+        text = Path("apcn_v11/ui.py").read_text(encoding="utf-8")
+        self.assertIn("Run 1 Automatic Consolidation Cycle", text)
+        self.assertIn("Migrate V0.10 Memory", text)
+        self.assertIn("Unified concept graph", text)
+        self.assertIn("Memory + discourse audit", text)
 
 
 if __name__ == "__main__":
