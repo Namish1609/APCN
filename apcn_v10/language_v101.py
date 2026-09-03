@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 import json
@@ -14,9 +13,9 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
     """V0.10.1 semantic-language patch.
 
     Intent is inferred from learned construction evidence rather than literal
-    English keys. V0.10.1 also lets punctuation become a learned structural
-    cue: if question-mark-bearing demonstrations consistently have one intent,
-    the learner can acquire that association statistically.
+    English keys. Punctuation can become a learned structural cue, and cues
+    that already function strongly as references/operators cannot independently
+    hijack clause intent.
     """
 
     VERSION = "APCN-V0.10.1-SEMANTIC-LANGUAGE-MEMORY"
@@ -62,41 +61,84 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
             return top[3].split(":", 1)[1]
         return None
 
+    def _functional_conflict(self, cue: str) -> float:
+        """How strongly a cue already serves a non-intent function."""
+        scores = []
+        for feat in self.feature_totals:
+            if feat.startswith("reference:") or feat.startswith("operator:"):
+                scores.append(self.feature_purity(cue, feat))
+        return max(scores, default=0.0)
+
+    def _intent_candidate(self, cue: str, position: str, length: int, at_start: bool):
+        # A cue that is primarily a reference/operator should not by itself
+        # decide clause intent. This resolves polyfunctional tokens through
+        # learned evidence rather than a literal stop-word list.
+        if self._functional_conflict(cue) >= 0.58:
+            return None
+        rows = []
+        for feat in self.feature_totals:
+            if not feat.startswith("intent:"):
+                continue
+            support = self.cue_support(cue, feat)
+            if support < 5:
+                continue
+            purity = self.feature_purity(cue, feat)
+            score = self.cue_score(cue, feat, position)
+            if score <= 0:
+                continue
+            value = score * (0.45 + 0.75 * purity) * (1.0 + 0.18 * (length - 1))
+            if at_start:
+                value *= 1.18
+            rows.append((value, purity, support, feat))
+        rows.sort(reverse=True)
+        if not rows:
+            return None
+        top = rows[0]
+        second = rows[1][0] if len(rows) > 1 else 0.0
+        margin = top[0] / max(second, 1e-9)
+        return top[0], top[1], margin, top[2], top[3]
+
     def _best_intent(self, tokens: Sequence[str]) -> str:
         if self._surface_question:
             learned = self._learned_question_intent()
             if learned is not None:
                 return learned
-
-        intent_features = [f for f in self.feature_totals if f.startswith("intent:")]
-        if not tokens or not intent_features:
+        if not tokens:
             return "ASSERT"
 
+        # First use learned clause-start constructions, preferring longer ones.
         candidates = []
         for n in range(1, min(5, len(tokens)) + 1):
             cue = " ".join(tokens[:n])
-            scored = []
-            for feat in intent_features:
-                support = self.cue_support(cue, feat)
-                if support < 5:
-                    continue
-                purity = self.feature_purity(cue, feat)
-                score = self.cue_score(cue, feat, "start")
-                if score <= 0:
-                    continue
-                value = score * (0.45 + 0.75 * purity) * (1.0 + 0.18 * (n - 1))
-                scored.append((value, purity, support, feat))
-            scored.sort(reverse=True)
-            if scored:
-                top = scored[0]
-                second = scored[1][0] if len(scored) > 1 else 0.0
-                margin = top[0] / max(second, 1e-9)
-                candidates.append((top[0], top[1], margin, n, top[2], top[3]))
+            row = self._intent_candidate(cue, "start", n, True)
+            if row is not None:
+                candidates.append((*row, n))
         candidates.sort(reverse=True)
-        for value, purity, margin, n, support, feat in candidates:
+        for value, purity, margin, support, feat, n in candidates:
             if purity >= 0.68 and support >= 6 and margin >= 1.10 and value >= 0.10:
                 return feat.split(":", 1)[1]
 
+        # If the first token was polyfunctional (e.g. a learned reference cue),
+        # allow a strong nearby construction to establish intent. This preserves
+        # contextual commands such as a discourse marker followed by a learned
+        # action cue without letting the reference cue itself imply GOAL.
+        early = []
+        limit = min(4, len(tokens))
+        for i in range(limit):
+            for n in range(1, min(3, len(tokens) - i) + 1):
+                cue = " ".join(tokens[i:i+n])
+                center = (i + (n - 1) / 2.0) / max(1, len(tokens) - 1)
+                row = self._intent_candidate(cue, self._bucket(center), n, i == 0)
+                if row is not None:
+                    early.append((*row, n, -i))
+        early.sort(reverse=True)
+        for value, purity, margin, support, feat, n, neg_i in early:
+            if purity >= 0.78 and support >= 8 and margin >= 1.15 and value >= 0.13:
+                return feat.split(":", 1)[1]
+
+        # Assertions are the unmarked proposition form in this current learned
+        # construction inventory. Choosing ASSERT here is preferable to allowing
+        # many weak generic correlations to hallucinate an action intent.
         return "ASSERT"
 
     def parse(self, utterance: str, discourse_focus=None, allow_sequence: bool = True):
