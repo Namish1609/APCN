@@ -20,7 +20,11 @@ jobs:
           python -m pip install -r requirements-headless.txt
       - name: Compile Python sources
         run: |
-          python -m compileall -q apcn_v07 apcn_v08 apcn_v09 apcn_v10 apcn_v11
+          python -m compileall -q apcn_v07 apcn_v08 apcn_v09 apcn_v10 apcn_v11 apcn_v12
           python -m py_compile *.py
       - name: Run tests
         run: python -m unittest discover -s tests -v
+      - name: V0.12 paired perception smoke benchmark
+        run: python benchmark_v0_12.py --train 480 --test 150 --difficulty 0.68
+      - name: V0.12 multi-seed hard perception gate
+        run: python validate_v0_12.py
