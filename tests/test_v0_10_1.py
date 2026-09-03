@@ -29,11 +29,10 @@ class TestV0101(unittest.TestCase):
         while s.learner.episode_count < 3200:
             s.step()
         rep=run_generated_language_test(s.learner,samples=300,seed=10101)
-        # V0.10.1 improves long-prefix intent construction scoring, but this is
-        # still a genuinely held-out-template benchmark rather than training
-        # sentence replay. Keep the regression floor honest and let the UI
-        # confusion matrix expose the actual measured result.
-        self.assertGreaterEqual(rep.intent_accuracy,0.80)
+        # Do not weaken this threshold to accommodate a regression. The test is
+        # intentionally held-out and specifically guards the ASSERT/QUERY intent
+        # failures that motivated V0.10.1.
+        self.assertGreaterEqual(rep.intent_accuracy,0.88)
         self.assertGreaterEqual(rep.relation_accuracy,0.95)
         self.assertEqual(rep.learner_episode_count_before,rep.learner_episode_count_after)
 
