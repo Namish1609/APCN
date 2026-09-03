@@ -1,40 +1,49 @@
-# APCN V0.11 — Unified Concept Memory + Self-Consolidation
+# APCN V0.12 — Self-Organizing Perception + Adaptive Correction
 
-Current release: **0.11.0**.
+Current release: **0.12.0**.
 
-APCN V0.11 moves the project from manually repeating large training batches toward an explicit self-diagnosis and consolidation loop:
+V0.12 addresses the persistent V0.11 error loop by changing two limiting representations rather than simply increasing training volume:
+
+- visual shape concepts now use a less-handcrafted pixel/patch representation instead of the old 23-D Hu/fill/aspect geometry summary;
+- language adds a bounded recent-evidence construction calibrator so targeted corrections can matter after thousands of lifetime observations.
+
+It remains non-neural in the current implementation: **no backpropagation, gradient descent, trainable neural layers or dense learned weight stack**.
+
+## What changed
+
+The V0.12 perception path is:
 
 ```text
-read-only test
+focused pixels
     ↓
-aggregate recurring errors
+generic normalization
     ↓
-rank weak concept boundaries / language constructions
+generic photometric evidence
++ normalized occupancy raster
++ local pixel/mask patches
     ↓
-generate targeted contrast experiences
+unlabeled online competitive patch codebook
     ↓
-consolidate compact memory
+spatial codeword representation
     ↓
-read-only retest
+compact concept statistics + bounded prototypes
 ```
 
-It remains non-neural in the current implementation: no backpropagation, gradient descent, trainable neural layers or dense learned weight stack.
+The patch codebook is bounded and label-free. It never receives words such as `circle`, `rectangle`, `yellow` or `orange`. Shape classification no longer relies on Hu moments, fill ratio or aspect ratio.
 
-## V0.11 highlights
+Language now combines:
 
-- bounded multi-prototype visual concepts instead of a single centroid per word;
-- aggregate error memory instead of retaining every failure;
-- automatic non-gradient consolidation prescriptions;
-- learned sentence-construction induction;
-- persistent discourse entity registry for `it`, `that object`, and stable instance identity;
-- stricter identity-aware reference testing;
-- unified sparse concept graph linking perception, language and definitions;
-- idempotent graph synchronization—viewing the graph cannot change knowledge;
-- V0.10 compact-memory migration without replaying old images or sentences;
-- persistent error/discourse/consolidation state across restarts;
-- new **Consolidation** desktop page with priorities, memory audit, concept graph and before→after curves.
+```text
+stable lifetime cue/construction memory
+        +
+bounded recent construction correction
+```
 
-## Update and run the desktop studio
+so known errors such as `ASSERT→GOAL`, `QUERY→ASSERT` and nested `NEGATE>ASSERT→NEGATE>GOAL` can receive meaningful targeted corrective evidence without deleting long-term knowledge.
+
+V0.11's error memory, discourse entity registry, unified concept graph and automatic consolidation loop remain in place.
+
+## Update and run
 
 ```bash
 cd ~/APCN
@@ -43,76 +52,102 @@ git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_11.py
+python run_desktop_v0_12.py
 ```
 
-The UI remains designed for a 1366×768 desktop and retains the Perception, Language, Definitions, Ask APCN and Testing Ground pages from V0.10.2.
+The UI remains based on the existing **1366×768** studio. V0.12 does not add another cluttered representation-training tab. The Perception panel shows a compact representation status and the existing Consolidation page shows learning priorities, memory audit, concept graph, recent language correction state and before→after curves.
 
-## Continue from your V0.10 training
+## Migration from V0.11
 
-If you already trained V0.10, open the **Consolidation** tab and click:
+On first V0.12 launch, if `outputs/v0_12/session_v0_12.json` does not exist but `outputs/v0_11/session_v0_11.json` does, compatible V0.11 knowledge is imported automatically.
+
+Directly migrated:
+
+- language lifetime memory;
+- definitions;
+- discourse state;
+- aggregate error signatures;
+- consolidation/test history.
+
+The V0.11 visual means/variances are **not** copied into V0.12 because the feature spaces are incompatible. Their episode count is retained as provenance, a small label-free patch-codebook bootstrap runs, and the first consolidation cycle automatically builds balanced V0.12 visual evidence before using known confusion signatures for targeted contrasts.
+
+After launch, the recommended first action is:
 
 ```text
-Migrate V0.10 Memory
+Consolidation → Run 1 Automatic Consolidation Cycle
 ```
 
-The normal migration paths are:
+## Tested perception result
+
+Paired V0.11/V0.12 tests use exactly the same training scenes and identically seeded held-out distributions.
+
+Smoke benchmark, 480 training experiences / 150 tests / difficulty 0.68:
 
 ```text
-outputs/v0_10/perception/concept_memory_v0_8.json
-outputs/v0_10/language_memory_v0_10.json
-outputs/v0_10/concept_store_v0_10.json
+                     V0.11       V0.12
+color                99.3%       100.0%
+shape                84.7%       100.0%
+joint                84.0%       100.0%
 ```
 
-V0.11 converts those compact memories; it does not need the original thousands of images or sentences.
+V0.11 produced repeated `square→circle`, `ellipse→rectangle` and `rectangle→ellipse` errors. V0.12 produced no visual errors in that matched run.
 
-Then click:
+Hard three-seed gate, 720 training experiences / 180 tests per seed / difficulty 0.82:
 
 ```text
-Run 1 Automatic Consolidation Cycle
+mean                 V0.11       V0.12
+color                99.44%      98.15%
+shape                90.93%      99.81%
+joint                90.37%      97.96%
 ```
 
-The cycle performs diagnosis → targeted visual/language learning → retesting and shows the before/after curves.
+Across 540 V0.12 hard held-out scenes there was one shape error (`triangle→ellipse`); the repeated rectangle↔ellipse and square↔circle failures were absent. V0.12 therefore trades a small amount of hard-regime color accuracy for a much larger shape/joint improvement in this synthetic benchmark.
 
-## Headless consolidation
+These results are **not** proof of general real-world vision or general intelligence; they are evidence that the new representation addresses the specific synthetic perception bottleneck that persisted in V0.11.
+
+## Headless experiments
+
+Migrate V0.11 and continue:
 
 ```bash
-python train_v0_11.py \
-  --visual-memory outputs/v0_10/perception/concept_memory_v0_8.json \
-  --language-memory outputs/v0_10/language_memory_v0_10.json \
-  --concept-memory outputs/v0_10/concept_store_v0_10.json \
-  --visual 0 \
+python train_v0_12.py \
+  --from-v11 \
+  --visual 1600 \
   --language 0 \
-  --consolidation-cycles 3 \
-  --definitions
-```
-
-Or start a clean V0.11 experiment:
-
-```bash
-python train_v0_11.py \
-  --visual 2000 \
-  --language 3200 \
-  --visual-test 500 \
-  --language-test 600 \
-  --definitions \
   --consolidation-cycles 2
 ```
 
-## What is stored?
+Run the matched benchmark:
 
-The visual learner does **not** retain all training images. Long-term visual memory is compact sufficient statistics plus a bounded prototype bank. The language learner does **not** retain all training sentences; it retains aggregate cue/ngram/semantic counts and induced construction statistics. Error memory collapses repeated mistakes into bounded signatures and the discourse registry is bounded working memory.
+```bash
+python benchmark_v0_12.py --train 480 --test 150 --difficulty 0.68
+```
 
-## Tests
+Run the three-seed hard gate:
+
+```bash
+python validate_v0_12.py
+```
+
+Run all regressions:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-See [`README_V0_11.md`](README_V0_11.md) for the full V0.11 architecture, migration workflow and scientific boundaries.
+## Memory model
 
-## Current scientific boundary
+V0.12 still does not retain every image, local patch or sentence. Long-term state consists primarily of:
 
-V0.11 does **not** establish that APCN scales to general intelligence or replaces transformers. The visual front end still uses the engineered anonymous 23-dimensional sensor. The V0.11 experiment is whether compact explicit knowledge can diagnose and target its own weaknesses without gradients or an unbounded episode archive.
+```text
+bounded patch codebook
++ visual sufficient statistics
++ bounded visual concept prototypes
++ lifetime language cue/construction aggregates
++ bounded recent language corrections
++ aggregate error signatures
++ sparse concept graph
++ bounded discourse working memory
+```
 
-A likely next major research direction is self-organizing perception from more generic local pixel structure rather than indefinitely improving the handcrafted sensor.
+See `README_V0_12.md` for the architecture, migration boundary, benchmarks and scientific limitations.
