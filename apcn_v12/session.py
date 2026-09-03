@@ -8,13 +8,13 @@ from apcn_v08.session import TrainingSessionV08
 from apcn_v10.definitions import ConceptStore, DefinitionCurriculum
 from apcn_v10.query import KnowledgeQueryEngine
 from apcn_v11.session import CognitiveSessionV11
-from apcn_v11.language import AdaptiveLanguageSessionV11, SemanticLanguageLearnerV11
 from apcn_v11.error_memory import ErrorMemory
 from apcn_v11.discourse import DiscourseEntityRegistry
 from apcn_v11.consolidation import ConsolidationEngine
 from apcn_v11.concept_graph import UnifiedConceptGraph
 
 from .visual import SelfOrganizingVisualLearner
+from .language import AdaptiveLanguageSessionV12, SemanticLanguageLearnerV12
 
 
 class TrainingSessionV12(TrainingSessionV08):
@@ -28,6 +28,7 @@ class CognitiveSessionV12(CognitiveSessionV11):
     def __init__(self, seed: int = 12):
         super().__init__(seed)
         self.visual = TrainingSessionV12(seed)
+        self.language = AdaptiveLanguageSessionV12(seed)
         self.graph = UnifiedConceptGraph()
         self.consolidation = ConsolidationEngine(self.errors)
         self.visual_test_history = []
@@ -61,7 +62,7 @@ class CognitiveSessionV12(CognitiveSessionV11):
 
         lp = out / "language_memory_v0_11.json"
         if lp.exists():
-            obj.language = AdaptiveLanguageSessionV11(seed, learner=SemanticLanguageLearnerV11.load(lp))
+            obj.language = AdaptiveLanguageSessionV12(seed, learner=SemanticLanguageLearnerV12.load(lp))
 
         cp = out / "concept_store_v0_11.json"
         if cp.exists():
@@ -103,7 +104,7 @@ class CognitiveSessionV12(CognitiveSessionV11):
             obj.visual = TrainingSessionV12(seed, learner=SelfOrganizingVisualLearner.load(vp))
         lp = out / "language_memory_v0_12.json"
         if lp.exists():
-            obj.language = AdaptiveLanguageSessionV11(seed, learner=SemanticLanguageLearnerV11.load(lp))
+            obj.language = AdaptiveLanguageSessionV12(seed, learner=SemanticLanguageLearnerV12.load(lp))
         cp = out / "concept_store_v0_12.json"
         if cp.exists():
             obj.concepts = ConceptStore.load(cp)
@@ -159,11 +160,11 @@ class CognitiveSessionV12(CognitiveSessionV11):
         """Bootstrap the new representation when required, then target errors."""
         requested = max(0, int(experiences)); trained = 0
         coverage = self.visual_coverage()
+        bootstrap_done = 0
         if not coverage["complete"] and requested > 0:
-            # Enough balanced examples to expose every factor repeatedly without
-            # requiring the user to decide which color/shape to train first.
             bootstrap_n = min(requested, max(180, requested // 2))
-            trained += self._balanced_visual_bootstrap(bootstrap_n)
+            bootstrap_done = self._balanced_visual_bootstrap(bootstrap_n)
+            trained += bootstrap_done
         remaining = max(0, requested - trained)
         if remaining > 0:
             result = super().consolidate_visual(remaining)
@@ -172,13 +173,14 @@ class CognitiveSessionV12(CognitiveSessionV11):
         else:
             targets = 0
         return {"trained": trained, "targets": targets,
-                "balanced_bootstrap": min(trained, requested-remaining)}
+                "balanced_bootstrap": bootstrap_done}
 
     def memory_audit(self) -> Dict[str, object]:
         base = super().memory_audit()
         base["v012_representation"] = self.visual.learner.representation_summary()
         base["v012_visual_coverage"] = self.visual_coverage()
         base["v012_representation_bootstrap"] = self.v012_bootstrap_experiences
+        base["v012_recent_language_corrections"] = self.language.learner.adaptive_constructions.summary()
         return base
 
     def save(self, output_dir: str | Path = "outputs/v0_12") -> Dict[str, str]:
