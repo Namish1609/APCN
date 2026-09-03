@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import json
 import math
 
@@ -29,9 +29,9 @@ class ConceptEdge:
 class UnifiedConceptGraph:
     """Sparse explicit memory shared across perception, language and definitions.
 
-    V0.11 deliberately keeps subsystem evidence separate at first and adds
-    evidence-backed bridges between it. A lexical word, a visual concept and a
-    semantic feature are not silently merged merely because their labels match.
+    The graph is a materialized view over subsystem evidence. `sync()` rebuilds
+    that view from current compact memories, making synchronization idempotent:
+    opening/refreshing the UI cannot strengthen knowledge by itself.
     """
 
     VERSION = "APCN-V0.11-UNIFIED-CONCEPT-GRAPH"
@@ -64,7 +64,6 @@ class UnifiedConceptGraph:
             e = ConceptEdge(src, dst, relation, w, float(support))
             self.edges[key] = e
         else:
-            # Evidence-weighted online update; no gradient/backpropagation.
             total = e.support + float(support)
             if total > 0:
                 e.weight = (e.weight * e.support + w * float(support)) / total
@@ -117,8 +116,6 @@ class UnifiedConceptGraph:
                                  confidence=purity, source="language")
                 self.strengthen(wid, fid, "DENOTES", min(1.0, score), cue_support)
 
-        # If the same learned lexical cue independently grounds in vision and
-        # denotes a semantic feature, create an explicit equivalence hypothesis.
         for node_id in list(self.nodes):
             if not node_id.startswith("word:"):
                 continue
@@ -146,6 +143,10 @@ class UnifiedConceptGraph:
                 self.strengthen(nid, did, "DEPENDS_ON", 1.0, max(1, rec.support))
 
     def sync(self, *, visual=None, language=None, definitions=None) -> None:
+        # Materialize from aggregate source memories. Do not accumulate the same
+        # evidence again merely because a UI/test asks for a refresh.
+        self.nodes = {}
+        self.edges = {}
         if visual is not None:
             self.sync_visual(visual)
         if language is not None:
