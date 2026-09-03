@@ -38,6 +38,7 @@ class CognitiveSessionV11:
         self.query = KnowledgeQueryEngine(self.concepts)
         self.visual_test_history = []
         self.language_test_history = []
+        self.consolidation_history = []
         self.test_history = self.language_test_history
 
     @classmethod
@@ -48,7 +49,6 @@ class CognitiveSessionV11:
                       error_memory: str | Path | None = None,
                       discourse_memory: str | Path | None = None,
                       session_memory: str | Path | None = None) -> "CognitiveSessionV11":
-        """Load V0.11 or migrate compatible V0.8/V0.10 compact memories."""
         obj = cls(seed)
         if visual_memory is not None and Path(visual_memory).exists():
             obj.visual = TrainingSessionV11(seed, learner=PrototypeConceptLearner.load(visual_memory))
@@ -70,6 +70,7 @@ class CognitiveSessionV11:
             data = json.loads(Path(session_memory).read_text(encoding="utf-8"))
             obj.visual_test_history = list(data.get("visual_test_history", []))
             obj.language_test_history = list(data.get("language_test_history", []))
+            obj.consolidation_history = list(data.get("consolidation_history", []))
             obj.test_history = obj.language_test_history
         return obj
 
@@ -153,7 +154,6 @@ class CognitiveSessionV11:
             ) if p.domain in {"visual_shape", "visual_color"}]
         if not rows:
             return {"trained": 0, "targets": 0}
-
         colors = list(self.visual.teacher.color_words)
         shapes = list(self.visual.teacher.shape_words)
         trained = 0
@@ -162,13 +162,11 @@ class CognitiveSessionV11:
             difficulty = 0.18 + 0.70 * ((i % 96) / 95.0)
             if p.domain == "visual_shape":
                 shape = p.target if (i // len(rows)) % 2 == 0 else p.contrast
-                if shape not in shapes:
-                    continue
+                if shape not in shapes: continue
                 color = colors[(i // 2) % len(colors)]
             else:
                 color = p.target if (i // len(rows)) % 2 == 0 else p.contrast
-                if color not in colors:
-                    continue
+                if color not in colors: continue
                 shape = shapes[(i // 2) % len(shapes)]
             ep = self.visual.teacher.generate(color=color, shape=shape, difficulty=difficulty,
                                               add_distractors=difficulty >= .45)
@@ -180,17 +178,13 @@ class CognitiveSessionV11:
     def _observe_language_episodes(self, skill: str, episodes) -> int:
         learned = 0
         registry = self.language.discourse if skill == "reference" else DiscourseEntityRegistry()
-        if skill == "reference":
-            registry.reset()
+        if skill == "reference": registry.reset()
         for ep in episodes:
             pred = self.language.learner.parse(ep.utterance, discourse_registry=registry)
             ok = self.language._skill_correct(skill, pred, ep.program)
-            if skill in self.language.skills:
-                self.language.skills[skill].update(ok)
+            if skill in self.language.skills: self.language.skills[skill].update(ok)
             self.language.learner.observe(ep)
-            context_node = pred
-            if context_node is None:
-                context_node = self.language.learner.parse(ep.utterance, discourse_registry=registry)
+            context_node = pred or self.language.learner.parse(ep.utterance, discourse_registry=registry)
             registry.ingest(context_node)
             learned += 1
         self.language.last_skill = skill
@@ -213,27 +207,20 @@ class CognitiveSessionV11:
                 self.language.step()
                 trained += max(1, self.language.learner.episode_count - before)
                 continue
-
             skill = e.context if e.context in self.language.SKILLS else "intent"
             truth_path = e.truth.split(">")
             inner_intent = next((x for x in truth_path if x in {"ASSERT", "QUERY", "GOAL"}), None)
             outer = truth_path[0] if truth_path else ""
-
             if e.domain == "language_reference" or skill == "reference":
-                skill = "reference"
-                episodes = self.language.teacher.for_skill("reference", held_out=False)
+                skill = "reference"; episodes = self.language.teacher.for_skill("reference", held_out=False)
             elif outer == "NEGATE" or skill == "negation":
-                skill = "negation"
-                episodes = [self.language.teacher.negated(False)]
+                skill = "negation"; episodes = [self.language.teacher.negated(False)]
             elif outer == "GROUP":
-                skill = "group"
-                episodes = [self.language.teacher.group(False)]
+                skill = "group"; episodes = [self.language.teacher.group(False)]
             elif outer == "SEQUENCE":
-                skill = "sequence"
-                episodes = [self.language.teacher.sequence(False)]
+                skill = "sequence"; episodes = [self.language.teacher.sequence(False)]
             elif inner_intent is not None:
-                skill = "intent"
-                episodes = [self.language.teacher.intent_contrast(inner_intent, held_out=False)]
+                skill = "intent"; episodes = [self.language.teacher.intent_contrast(inner_intent, held_out=False)]
             else:
                 episodes = self.language.teacher.for_skill(skill, held_out=False)
             trained += self._observe_language_episodes(skill, episodes)
@@ -242,39 +229,32 @@ class CognitiveSessionV11:
     def consolidation_cycle(self, *, visual_test: int = 300, language_test: int = 360,
                             visual_train: int = 400, language_train: int = 500,
                             difficulty: float = .82) -> Dict[str, object]:
-        v0 = self.test_visual(visual_test, difficulty)
-        l0 = self.test_language(language_test)
+        v0 = self.test_visual(visual_test, difficulty); l0 = self.test_language(language_test)
         self.sync_graph()
         before = {
-            "visual_joint": v0.joint_accuracy,
-            "visual_shape": v0.shape_accuracy,
-            "language_exact": l0.exact_accuracy,
-            "language_intent": l0.intent_accuracy,
+            "visual_joint": v0.joint_accuracy, "visual_shape": v0.shape_accuracy,
+            "language_exact": l0.exact_accuracy, "language_intent": l0.intent_accuracy,
             "language_reference": l0.skill_accuracy.get("reference", 0.0),
         }
         planned = [p.__dict__ for p in self.prescriptions(12)]
-        vtrain = self.consolidate_visual(visual_train)
-        ltrain = self.consolidate_language(language_train)
-        v1 = self.test_visual(visual_test, difficulty)
-        l1 = self.test_language(language_test)
+        vtrain = self.consolidate_visual(visual_train); ltrain = self.consolidate_language(language_train)
+        v1 = self.test_visual(visual_test, difficulty); l1 = self.test_language(language_test)
         graph = self.sync_graph()
         after = {
-            "visual_joint": v1.joint_accuracy,
-            "visual_shape": v1.shape_accuracy,
-            "language_exact": l1.exact_accuracy,
-            "language_intent": l1.intent_accuracy,
+            "visual_joint": v1.joint_accuracy, "visual_shape": v1.shape_accuracy,
+            "language_exact": l1.exact_accuracy, "language_intent": l1.intent_accuracy,
             "language_reference": l1.skill_accuracy.get("reference", 0.0),
         }
-        ambiguous = len(self.consolidation.visual_ambiguities(
-            self.visual.learner, self.visual.teacher.shape_words, limit=30))
+        ambiguous = len(self.consolidation.visual_ambiguities(self.visual.learner, self.visual.teacher.shape_words, limit=30))
         objective = self.consolidation.objective(
             error_rate=1.0 - 0.5 * (v1.joint_accuracy + l1.exact_accuracy),
-            active_edges=int(graph.get("edges", 0)),
-            ambiguous_pairs=ambiguous,
+            active_edges=int(graph.get("edges", 0)), ambiguous_pairs=ambiguous,
         )
-        return {"before": before, "after": after, "visual_training": vtrain,
-                "language_training": ltrain, "prescriptions": planned,
-                "diagnostic_objective": objective}
+        result = {"before": before, "after": after, "visual_training": vtrain,
+                  "language_training": ltrain, "prescriptions": planned,
+                  "diagnostic_objective": objective}
+        self.consolidation_history.append(result)
+        return result
 
     def memory_audit(self) -> Dict[str, object]:
         self.sync_graph()
@@ -294,28 +274,22 @@ class CognitiveSessionV11:
         }
 
     def save(self, output_dir: str | Path = "outputs/v0_11") -> Dict[str, str]:
-        out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
-        visual = out / "visual_memory_v0_11.json"
-        language = out / "language_memory_v0_11.json"
-        concepts = out / "concept_store_v0_11.json"
-        graph = out / "unified_concept_graph_v0_11.json"
-        errors = out / "error_memory_v0_11.json"
-        discourse = out / "discourse_state_v0_11.json"
+        out = Path(output_dir); out.mkdir(parents=True, exist_ok=True)
+        visual = out / "visual_memory_v0_11.json"; language = out / "language_memory_v0_11.json"
+        concepts = out / "concept_store_v0_11.json"; graph = out / "unified_concept_graph_v0_11.json"
+        errors = out / "error_memory_v0_11.json"; discourse = out / "discourse_state_v0_11.json"
         state = out / "session_v0_11.json"
-        self.visual.learner.save(visual)
-        self.language.learner.save(language)
-        self.concepts.save(concepts)
-        self.graph.save(graph)
-        self.errors.save(errors)
-        self.language.discourse.save(discourse)
+        # Audit first so the graph file corresponds to the same synchronized
+        # state summarized in the checkpoint metadata.
+        audit = self.memory_audit()
+        self.visual.learner.save(visual); self.language.learner.save(language); self.concepts.save(concepts)
+        self.graph.save(graph); self.errors.save(errors); self.language.discourse.save(discourse)
         state.write_text(json.dumps({
-            "version": self.VERSION,
-            "seed": self.seed,
+            "version": self.VERSION, "seed": self.seed,
             "visual_test_history": self.visual_test_history,
             "language_test_history": self.language_test_history,
-            "memory_audit": self.memory_audit(),
+            "consolidation_history": self.consolidation_history,
+            "memory_audit": audit,
         }, indent=2), encoding="utf-8")
         return {"visual": str(visual), "language": str(language), "concepts": str(concepts),
-                "graph": str(graph), "errors": str(errors), "discourse": str(discourse),
-                "session": str(state)}
+                "graph": str(graph), "errors": str(errors), "discourse": str(discourse), "session": str(state)}
