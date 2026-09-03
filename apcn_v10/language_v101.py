@@ -11,16 +11,6 @@ from .definitions import ConceptStore, DefinitionCurriculum
 
 
 class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
-    """V0.10.1 intent-construction fix.
-
-    V0.10 accumulated many weak 1-3 token intent associations. On held-out
-    templates, generic cues could collectively overpower a highly diagnostic
-    sentence prefix. V0.10.1 explicitly evaluates learned prefix constructions
-    up to five tokens, using purity/support/contrast and a length bonus. This is
-    still learned from cue statistics; no English phrase is hardcoded to an
-    intent label.
-    """
-
     VERSION = "APCN-V0.10.1-SEMANTIC-LANGUAGE-MEMORY"
 
     def _best_intent(self, tokens: Sequence[str]) -> str:
@@ -29,7 +19,6 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
         intent_features = [f for f in self.feature_totals if f.startswith("intent:")]
         if not intent_features:
             return "ASSERT"
-
         prefix_candidates = []
         max_n = min(5, len(tokens))
         for n in range(1, max_n + 1):
@@ -92,6 +81,12 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
 class AdaptiveLanguageSessionV101(AdaptiveLanguageSession):
     def __init__(self, seed: int = 10, learner: Optional[SemanticLanguageLearnerV101] = None):
         super().__init__(seed=seed, learner=learner or SemanticLanguageLearnerV101())
+        self.last_step = None
+
+    def step(self):
+        result = super().step()
+        self.last_step = result
+        return result
 
     def save(self, output_dir: str | Path = "outputs/v0_10_1") -> Path:
         out = Path(output_dir); out.mkdir(parents=True, exist_ok=True)
