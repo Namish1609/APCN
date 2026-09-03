@@ -8,6 +8,7 @@ from apcn_v07.generator import ProceduralTeacher
 from apcn_v11.visual import PrototypeConceptLearner
 from apcn_v12.sensor import SelfOrganizingPatchSensor
 from apcn_v12.visual import SelfOrganizingVisualLearner
+from apcn_v12.language import AdaptiveConstructionCalibrator
 from apcn_v12.session import CognitiveSessionV12
 
 
@@ -93,6 +94,20 @@ class TestV012(unittest.TestCase):
         self.assertGreater(rep.color_accuracy, .55)
         self.assertGreater(rep.shape_accuracy, .35)
         self.assertGreater(rep.joint_accuracy, .22)
+
+    def test_recent_construction_correction_can_overcome_stale_evidence(self):
+        c = AdaptiveConstructionCalibrator(decay=.86, max_patterns=64)
+        pattern = "it is the case that <ENTITY> is <REL> the <ENTITY>"
+        for _ in range(80):
+            c.observe(pattern, "GOAL")
+        label, _, _ = c.predict(pattern)
+        self.assertEqual(label, "GOAL")
+        for _ in range(28):
+            c.observe(pattern, "ASSERT")
+        label, conf, _ = c.predict(pattern)
+        self.assertEqual(label, "ASSERT")
+        self.assertGreater(conf, .5)
+        self.assertLessEqual(c.summary()["patterns"], 64)
 
     def test_v012_ui_keeps_existing_layout_and_exposes_representation_status(self):
         text = Path("apcn_v12/ui.py").read_text(encoding="utf-8")
