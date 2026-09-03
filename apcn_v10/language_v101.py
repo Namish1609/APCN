@@ -62,7 +62,6 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
         return None
 
     def _functional_conflict(self, cue: str) -> float:
-        """How strongly a cue already serves a non-intent function."""
         scores = []
         for feat in self.feature_totals:
             if feat.startswith("reference:") or feat.startswith("operator:"):
@@ -70,9 +69,6 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
         return max(scores, default=0.0)
 
     def _intent_candidate(self, cue: str, position: str, length: int, at_start: bool):
-        # A cue that is primarily a reference/operator should not by itself
-        # decide clause intent. This resolves polyfunctional tokens through
-        # learned evidence rather than a literal stop-word list.
         if self._functional_conflict(cue) >= 0.58:
             return None
         rows = []
@@ -106,7 +102,6 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
         if not tokens:
             return "ASSERT"
 
-        # First use learned clause-start constructions, preferring longer ones.
         candidates = []
         for n in range(1, min(5, len(tokens)) + 1):
             cue = " ".join(tokens[:n])
@@ -118,27 +113,35 @@ class SemanticLanguageLearnerV101(SemanticLanguageLearnerV10):
             if purity >= 0.68 and support >= 6 and margin >= 1.10 and value >= 0.10:
                 return feat.split(":", 1)[1]
 
-        # If the first token was polyfunctional (e.g. a learned reference cue),
-        # allow a strong nearby construction to establish intent. This preserves
-        # contextual commands such as a discourse marker followed by a learned
-        # action cue without letting the reference cue itself imply GOAL.
+        # A polyfunctional discourse/reference cue at sentence start may hide a
+        # command cue one or two positions later. Internal fallback is therefore
+        # permitted only to establish GOAL. It cannot infer QUERY from an
+        # interior copula or other generic token; questions use learned surface
+        # and clause-level evidence above.
+        goal_feature = "intent:GOAL"
         early = []
         limit = min(4, len(tokens))
         for i in range(limit):
             for n in range(1, min(3, len(tokens) - i) + 1):
                 cue = " ".join(tokens[i:i+n])
+                if self._functional_conflict(cue) >= 0.58:
+                    continue
+                support = self.cue_support(cue, goal_feature)
+                if support < 5:
+                    continue
+                purity = self.feature_purity(cue, goal_feature)
                 center = (i + (n - 1) / 2.0) / max(1, len(tokens) - 1)
-                row = self._intent_candidate(cue, self._bucket(center), n, i == 0)
-                if row is not None:
-                    early.append((*row, n, -i))
+                score = self.cue_score(cue, goal_feature, self._bucket(center))
+                if score <= 0:
+                    continue
+                value = score * (0.45 + 0.75 * purity) * (1.0 + 0.12 * (n - 1))
+                early.append((value, purity, support, n, -i))
         early.sort(reverse=True)
-        for value, purity, margin, support, feat, n, neg_i in early:
-            if purity >= 0.78 and support >= 8 and margin >= 1.15 and value >= 0.13:
-                return feat.split(":", 1)[1]
+        if early:
+            value, purity, support, n, neg_i = early[0]
+            if purity >= 0.65 and support >= 5 and value >= 0.08:
+                return "GOAL"
 
-        # Assertions are the unmarked proposition form in this current learned
-        # construction inventory. Choosing ASSERT here is preferable to allowing
-        # many weak generic correlations to hallucinate an action intent.
         return "ASSERT"
 
     def parse(self, utterance: str, discourse_focus=None, allow_sequence: bool = True):
