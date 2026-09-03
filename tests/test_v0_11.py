@@ -12,7 +12,7 @@ from apcn_v11.language import SemanticLanguageLearnerV11
 from apcn_v11.discourse import DiscourseEntityRegistry
 from apcn_v11.language_teacher import RichSemanticTeacherV11
 from apcn_v10.language_teacher import RichSemanticTeacher
-from apcn_v10.semantic import EntityRef, SemanticNode
+from apcn_v10.semantic import SemanticNode
 from apcn_v10.definitions import ConceptStore
 
 
@@ -24,6 +24,19 @@ class TestV011(unittest.TestCase):
         self.assertEqual(len(mem.signatures), 1)
         self.assertEqual(mem.top()[0].count, 100)
         self.assertEqual(sum(len(v) for v in mem.representatives.values()), 2)
+
+    def test_error_memory_preserves_nested_program_path(self):
+        class Failure:
+            skill = "negation"
+            utterance = "the circle is not below the square"
+            expected = "NEGATE\n  ASSERT\n    R4(C0:S0:0, C1:S1:1)"
+            predicted = "NEGATE\n  GOAL\n    R4(C0:S0:0, C1:S1:1)"
+        class Report:
+            failures = [Failure()]
+        mem = ErrorMemory(); mem.record_language_report(Report())
+        row = mem.top()[0]
+        self.assertEqual(row.truth, "NEGATE>ASSERT")
+        self.assertEqual(row.predicted, "NEGATE>GOAL")
 
     def test_visual_prototypes_are_bounded_not_episode_archive(self):
         learner = PrototypeConceptLearner(max_prototypes=4, new_prototype_distance=.15)
@@ -110,6 +123,13 @@ class TestV011(unittest.TestCase):
         self.assertEqual(c.instance, 2)
         self.assertEqual(reg.summary()["entity_count"], 3)
 
+    def test_discourse_registry_persistence(self):
+        reg = DiscourseEntityRegistry(); a = reg.new_entity("C2", "S3", focus=True); reg.new_entity("C1", "S0")
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "discourse.json"; reg.save(p); loaded = DiscourseEntityRegistry.load(p)
+        self.assertEqual(loaded.focus.instance, a.instance)
+        self.assertEqual(loaded.summary()["entity_count"], 2)
+
     def test_reference_teacher_avoids_ambiguous_duplicate_target(self):
         teacher = RichSemanticTeacherV11(seed=1101)
         for _ in range(40):
@@ -133,6 +153,15 @@ class TestV011(unittest.TestCase):
         self.assertIn("Migrate V0.10 Memory", text)
         self.assertIn("Unified concept graph", text)
         self.assertIn("Memory + discourse audit", text)
+
+    def test_v011_release_metadata_and_launcher(self):
+        version = Path("VERSION").read_text(encoding="utf-8")
+        launcher = Path("run_desktop_v0_11.py").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        self.assertTrue(version.startswith("0.11.0\n"))
+        self.assertIn("from apcn_v11.ui import run_app", launcher)
+        self.assertIn("APCN V0.11", readme)
+        self.assertIn("Migrate V0.10 Memory", readme)
 
 
 if __name__ == "__main__":
