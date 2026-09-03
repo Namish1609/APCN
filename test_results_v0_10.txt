@@ -1,0 +1,36 @@
+language 250/2800 (8.9%) skill=reference
+language 750/2800 (26.8%) skill=intent
+language 1000/2800 (35.7%) skill=reference
+language 1250/2800 (44.6%) skill=reference
+language 1500/2800 (53.6%) skill=negation
+language 1750/2800 (62.5%) skill=intent
+language 2000/2800 (71.4%) skill=group
+language 2250/2800 (80.4%) skill=sequence
+language 2500/2800 (89.3%) skill=intent
+language 2750/2800 (98.2%) skill=intent
+{
+  "language_episodes": 2800,
+  "competence": {
+    "grounding": 0.8738728292090356,
+    "intent": 0.9952586772759494,
+    "group": 0.7138000257457525,
+    "sequence": 0.8587015084764774,
+    "negation": 0.9999997127654515,
+    "reference": 0.8360047389229531
+  },
+  "generated_test": {
+    "exact": 0.7716666666666666,
+    "intent": 0.8683333333333333,
+    "relation": 1.0,
+    "operator": 0.97,
+    "skill_accuracy": {
+      "grounding": 0.52,
+      "intent": 0.58,
+      "group": 1.0,
+      "sequence": 0.53,
+      "negation": 1.0,
+      "reference": 1.0
+    }
+  },
+  "definitions": 8
+}
