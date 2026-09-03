@@ -1,34 +1,107 @@
-# APCN V0.10.1 — Automatic grounded learning + explicit concept query
+# APCN V0.11 — Unified Concept Memory + Self-Consolidation
 
-Current release: **0.10.1**.
+Current release: **0.11.0**.
 
-V0.10.1 keeps V0.10's automatic grounded-language curriculum and concept-from-concept definitions, then adds the missing evaluation and interaction layer:
+APCN V0.11 moves the project from manually repeating large training batches toward an explicit self-diagnosis and consolidation loop:
 
-- live progress for perception and language training;
-- automatic semantic-language curriculum;
-- color + shape read-only testing with confusion matrices, failures and graphs;
-- generated held-out language testing;
-- APCN firing/spiking visualization in Perception, Language and Definitions;
-- **Ask APCN** concept-memory interface (`what is acceleration?`);
-- executable concept queries (`calculate acceleration if velocity change = 20 and time = 4`);
-- improved learned intent constructions up to five-token prefixes.
+```text
+read-only test
+    ↓
+aggregate recurring errors
+    ↓
+rank weak concept boundaries / language constructions
+    ↓
+generate targeted contrast experiences
+    ↓
+consolidate compact memory
+    ↓
+read-only retest
+```
 
-## Run the desktop studio
+It remains non-neural in the current implementation: no backpropagation, gradient descent, trainable neural layers or dense learned weight stack.
+
+## V0.11 highlights
+
+- bounded multi-prototype visual concepts instead of a single centroid per word;
+- aggregate error memory instead of retaining every failure;
+- automatic non-gradient consolidation prescriptions;
+- learned sentence-construction induction;
+- persistent discourse entity registry for `it`, `that object`, and stable instance identity;
+- stricter identity-aware reference testing;
+- unified sparse concept graph linking perception, language and definitions;
+- idempotent graph synchronization—viewing the graph cannot change knowledge;
+- V0.10 compact-memory migration without replaying old images or sentences;
+- persistent error/discourse/consolidation state across restarts;
+- new **Consolidation** desktop page with priorities, memory audit, concept graph and before→after curves.
+
+## Update and run the desktop studio
 
 ```bash
 cd ~/APCN
+git checkout main
 git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_10_1.py
+python run_desktop_v0_11.py
 ```
 
-The compatibility launcher also opens the latest patch:
+The UI remains designed for a 1366×768 desktop and retains the Perception, Language, Definitions, Ask APCN and Testing Ground pages from V0.10.2.
+
+## Continue from your V0.10 training
+
+If you already trained V0.10, open the **Consolidation** tab and click:
+
+```text
+Migrate V0.10 Memory
+```
+
+The normal migration paths are:
+
+```text
+outputs/v0_10/perception/concept_memory_v0_8.json
+outputs/v0_10/language_memory_v0_10.json
+outputs/v0_10/concept_store_v0_10.json
+```
+
+V0.11 converts those compact memories; it does not need the original thousands of images or sentences.
+
+Then click:
+
+```text
+Run 1 Automatic Consolidation Cycle
+```
+
+The cycle performs diagnosis → targeted visual/language learning → retesting and shows the before/after curves.
+
+## Headless consolidation
 
 ```bash
-python run_desktop_v0_10.py
+python train_v0_11.py \
+  --visual-memory outputs/v0_10/perception/concept_memory_v0_8.json \
+  --language-memory outputs/v0_10/language_memory_v0_10.json \
+  --concept-memory outputs/v0_10/concept_store_v0_10.json \
+  --visual 0 \
+  --language 0 \
+  --consolidation-cycles 3 \
+  --definitions
 ```
+
+Or start a clean V0.11 experiment:
+
+```bash
+python train_v0_11.py \
+  --visual 2000 \
+  --language 3200 \
+  --visual-test 500 \
+  --language-test 600 \
+  --definitions \
+  --consolidation-cycles 2
+```
+
+## What is stored?
+
+The visual learner does **not** retain all training images. Long-term visual memory is compact sufficient statistics plus a bounded prototype bank. The language learner does **not** retain all training sentences; it retains aggregate cue/ngram/semantic counts and induced construction statistics. Error memory collapses repeated mistakes into bounded signatures and the discourse registry is bounded working memory.
 
 ## Tests
 
@@ -36,4 +109,10 @@ python run_desktop_v0_10.py
 python -m unittest discover -s tests -v
 ```
 
-See `README_V0_10_1.md` for the V0.10.1 workflow and scientific boundaries, and `README_V0_10.md` for the V0.10 architecture.
+See [`README_V0_11.md`](README_V0_11.md) for the full V0.11 architecture, migration workflow and scientific boundaries.
+
+## Current scientific boundary
+
+V0.11 does **not** establish that APCN scales to general intelligence or replaces transformers. The visual front end still uses the engineered anonymous 23-dimensional sensor. The V0.11 experiment is whether compact explicit knowledge can diagnose and target its own weaknesses without gradients or an unbounded episode archive.
+
+A likely next major research direction is self-organizing perception from more generic local pixel structure rather than indefinitely improving the handcrafted sensor.
