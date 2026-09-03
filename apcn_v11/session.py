@@ -38,21 +38,17 @@ class CognitiveSessionV11:
         self.query = KnowledgeQueryEngine(self.concepts)
         self.visual_test_history = []
         self.language_test_history = []
-        # Compatibility with existing learning-curve widgets.
         self.test_history = self.language_test_history
 
     @classmethod
     def from_memories(cls, *, seed: int = 11, visual_memory: str | Path | None = None,
                       language_memory: str | Path | None = None,
                       concept_memory: str | Path | None = None) -> "CognitiveSessionV11":
-        """Migrate existing V0.8/V0.10 compact memories instead of retraining from zero."""
         obj = cls(seed)
         if visual_memory is not None and Path(visual_memory).exists():
-            learner = PrototypeConceptLearner.load(visual_memory)
-            obj.visual = TrainingSessionV11(seed, learner=learner)
+            obj.visual = TrainingSessionV11(seed, learner=PrototypeConceptLearner.load(visual_memory))
         if language_memory is not None and Path(language_memory).exists():
-            learner = SemanticLanguageLearnerV11.load(language_memory)
-            obj.language = AdaptiveLanguageSessionV11(seed, learner=learner)
+            obj.language = AdaptiveLanguageSessionV11(seed, learner=SemanticLanguageLearnerV11.load(language_memory))
         if concept_memory is not None and Path(concept_memory).exists():
             obj.concepts = ConceptStore.load(concept_memory)
             obj.definitions.store = obj.concepts
@@ -69,8 +65,7 @@ class CognitiveSessionV11:
         while remaining > 0:
             before = self.language.learner.episode_count
             self.language.step()
-            gained = max(1, self.language.learner.episode_count - before)
-            remaining -= gained
+            remaining -= max(1, self.language.learner.episode_count - before)
 
     def learn_definition_curriculum(self) -> None:
         self.definitions.train_all_once()
@@ -117,26 +112,22 @@ class CognitiveSessionV11:
         )
 
     def consolidate_visual(self, experiences: int = 400) -> Dict[str, int]:
-        """Generate targeted minimal contrasts from current visual confusions."""
         rows = [p for p in self.prescriptions(20) if p.domain in {"visual_shape", "visual_color"}]
         if not rows:
-            rows = self.consolidation.prescriptions(
+            rows = [p for p in self.consolidation.prescriptions(
                 visual_learner=self.visual.learner,
                 colors=self.visual.teacher.color_words,
                 shapes=self.visual.teacher.shape_words,
                 limit=12,
-            )
-            rows = [p for p in rows if p.domain in {"visual_shape", "visual_color"}]
+            ) if p.domain in {"visual_shape", "visual_color"}]
         if not rows:
             return {"trained": 0, "targets": 0}
 
         colors = list(self.visual.teacher.color_words)
         shapes = list(self.visual.teacher.shape_words)
         trained = 0
-        n = max(0, int(experiences))
-        for i in range(n):
+        for i in range(max(0, int(experiences))):
             p = rows[i % len(rows)]
-            # Begin with clean minimal pairs, then restore nuisance factors.
             difficulty = 0.18 + 0.70 * ((i % 96) / 95.0)
             if p.domain == "visual_shape":
                 shape = p.target if (i // len(rows)) % 2 == 0 else p.contrast
@@ -174,9 +165,15 @@ class CognitiveSessionV11:
         self.language.last_skill = skill
         return learned
 
+    def _language_error_targets(self, limit: int = 24):
+        domains = {"language_program", "language_reference", "language_semantics"}
+        rows = [e for e in self.errors.top(limit=200) if e.domain in domains]
+        rows.sort(key=lambda e: (e.recent_weight, e.count), reverse=True)
+        return rows[:limit]
+
     def consolidate_language(self, experiences: int = 500) -> Dict[str, int]:
-        """Target recurring program/intent failures with fresh contrastive language."""
-        errors = self.errors.top("language_program", limit=20)
+        """Target intent, nested operator and reference-identity errors."""
+        errors = self._language_error_targets(24)
         trained = 0
         requested = max(0, int(experiences))
         for i in range(requested):
@@ -188,15 +185,25 @@ class CognitiveSessionV11:
                 continue
 
             skill = e.context if e.context in self.language.SKILLS else "intent"
-            if e.truth in {"ASSERT", "QUERY", "GOAL"}:
+            truth_path = e.truth.split(">")
+            inner_intent = next((x for x in truth_path if x in {"ASSERT", "QUERY", "GOAL"}), None)
+            outer = truth_path[0] if truth_path else ""
+
+            if e.domain == "language_reference" or skill == "reference":
+                skill = "reference"
+                episodes = self.language.teacher.for_skill("reference", held_out=False)
+            elif outer == "NEGATE" or skill == "negation":
+                skill = "negation"
+                episodes = [self.language.teacher.negated(False)]
+            elif outer == "GROUP":
+                skill = "group"
+                episodes = [self.language.teacher.group(False)]
+            elif outer == "SEQUENCE":
+                skill = "sequence"
+                episodes = [self.language.teacher.sequence(False)]
+            elif inner_intent is not None:
                 skill = "intent"
-                episodes = [self.language.teacher.intent_contrast(e.truth, held_out=False)]
-            elif e.truth == "NEGATE":
-                skill, episodes = "negation", [self.language.teacher.negated(False)]
-            elif e.truth == "GROUP":
-                skill, episodes = "group", [self.language.teacher.group(False)]
-            elif e.truth == "SEQUENCE":
-                skill, episodes = "sequence", [self.language.teacher.sequence(False)]
+                episodes = [self.language.teacher.intent_contrast(inner_intent, held_out=False)]
             else:
                 episodes = self.language.teacher.for_skill(skill, held_out=False)
             trained += self._observe_language_episodes(skill, episodes)
@@ -205,7 +212,6 @@ class CognitiveSessionV11:
     def consolidation_cycle(self, *, visual_test: int = 300, language_test: int = 360,
                             visual_train: int = 400, language_train: int = 500,
                             difficulty: float = .82) -> Dict[str, object]:
-        """Read-only diagnose -> targeted new evidence -> read-only retest."""
         v0 = self.test_visual(visual_test, difficulty)
         l0 = self.test_language(language_test)
         self.sync_graph()
@@ -233,7 +239,7 @@ class CognitiveSessionV11:
             self.visual.learner, self.visual.teacher.shape_words, limit=30))
         objective = self.consolidation.objective(
             error_rate=1.0 - 0.5 * (v1.joint_accuracy + l1.exact_accuracy),
-            active_edges=int(graph.get("edge_count", 0)),
+            active_edges=int(graph.get("edges", 0)),
             ambiguous_pairs=ambiguous,
         )
         return {"before": before, "after": after, "visual_training": vtrain,
