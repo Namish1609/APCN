@@ -7,8 +7,12 @@ import json
 import math
 
 from apcn_v10.language_v101 import SemanticLanguageLearnerV101
-from apcn_v10.language_session import AdaptiveLanguageSession
+from apcn_v10.language_session import AdaptiveLanguageSession, AdaptiveStep
 from apcn_v10.language_common import LanguageEpisode, tokenize
+from apcn_v10.semantic import EntityRef, SemanticNode
+
+from .discourse import DiscourseEntityRegistry
+from .language_teacher import RichSemanticTeacherV11
 
 
 class ConstructionInducer:
@@ -88,7 +92,6 @@ class ConstructionInducer:
             return
         self.pattern_intent[pattern][intent] += 1
         parts = pattern.split()
-        # Learn reusable left-edge constructions, not just whole templates.
         for n in range(1, min(8, len(parts)) + 1):
             self.prefix_intent[" ".join(parts[:n])][intent] += 1
         self.observations += 1
@@ -174,8 +177,6 @@ class SemanticLanguageLearnerV11(SemanticLanguageLearnerV101):
 
     def observe(self, episode: LanguageEpisode) -> None:
         super().observe(episode)
-        # Observe after lexical/semantic evidence update so the abstractor can
-        # use the newest grounded cue associations.
         self.constructions.observe(self, episode)
 
     def _best_intent(self, tokens: Sequence[str]) -> str:
@@ -183,6 +184,68 @@ class SemanticLanguageLearnerV11(SemanticLanguageLearnerV101):
         if label is not None and confidence >= 0.67:
             return label
         return super()._best_intent(tokens)
+
+    def _has_learned_reference(self, tokens: Sequence[str]) -> bool:
+        for n in range(1, min(3, len(tokens)) + 1):
+            for i in range(len(tokens)-n+1):
+                cue = " ".join(tokens[i:i+n])
+                feat, score = self.best_feature(cue, ("reference:",))
+                if (feat == self.reference_feature and score >= 0.56
+                        and self.feature_purity(cue, self.reference_feature) >= 0.56
+                        and self.cue_support(cue, self.reference_feature) >= 4):
+                    return True
+        return False
+
+    @staticmethod
+    def _map_relations(node: SemanticNode, mapper) -> SemanticNode:
+        if node.op == "RELATION":
+            return mapper(node)
+        return SemanticNode(node.op, relation=node.relation, subject=node.subject,
+                            object=node.object,
+                            children=tuple(SemanticLanguageLearnerV11._map_relations(c, mapper)
+                                           for c in node.children))
+
+    def _bind_discourse(self, node: SemanticNode, tokens: Sequence[str],
+                        registry: DiscourseEntityRegistry) -> SemanticNode:
+        reference = self._has_learned_reference(tokens)
+        first_relation = True
+
+        def bind(atom: SemanticNode) -> SemanticNode:
+            nonlocal first_relation
+            subject = atom.subject
+            obj = atom.object
+            if subject is None or obj is None:
+                return atom
+            if reference and first_relation:
+                resolved = registry.resolve_reference(role="subject")
+                if resolved is not None:
+                    subject = resolved
+                # The explicit noun phrase in a reference continuation is a
+                # discourse entity in its own right. V0.11's teacher ensures it
+                # is descriptively distinct from entities in the preceding turn.
+                obj = registry.resolve_description(obj.color, obj.shape, create=True,
+                                                   prefer_existing=True, role="object") or obj
+            else:
+                subject = registry.resolve_description(subject.color, subject.shape,
+                                                       create=True, prefer_existing=True,
+                                                       role="subject") or subject
+                obj = registry.resolve_description(obj.color, obj.shape, create=True,
+                                                   prefer_existing=True, role="object") or obj
+            first_relation = False
+            return SemanticNode("RELATION", relation=atom.relation, subject=subject, object=obj)
+
+        return self._map_relations(node, bind)
+
+    def parse(self, utterance: str, discourse_focus: Optional[EntityRef] = None,
+              allow_sequence: bool = True,
+              discourse_registry: Optional[DiscourseEntityRegistry] = None) -> Optional[SemanticNode]:
+        focus = discourse_focus
+        if discourse_registry is not None and discourse_registry.focus is not None:
+            focus = discourse_registry.focus
+        node = super().parse(utterance, focus, allow_sequence)
+        if node is None or discourse_registry is None:
+            return node
+        return self._bind_discourse(node, tokenize(utterance), discourse_registry)
 
     def save(self, path: str | Path) -> None:
         super().save(path)
@@ -208,9 +271,31 @@ class SemanticLanguageLearnerV11(SemanticLanguageLearnerV101):
 class AdaptiveLanguageSessionV11(AdaptiveLanguageSession):
     def __init__(self, seed: int = 11, learner: Optional[SemanticLanguageLearnerV11] = None):
         super().__init__(seed=seed, learner=learner or SemanticLanguageLearnerV11())
+        self.teacher = RichSemanticTeacherV11(seed)
+        self.discourse = DiscourseEntityRegistry()
         self.last_step = None
 
     def step(self):
-        row = super().step()
-        self.last_step = row
-        return row
+        skill = self.choose_skill()
+        episodes = self.teacher.for_skill(skill, held_out=False)
+        registry = self.discourse if skill == "reference" else DiscourseEntityRegistry()
+        if skill == "reference":
+            registry.reset()
+        result: Optional[AdaptiveStep] = None
+        for ep in episodes:
+            pred = self.learner.parse(ep.utterance, discourse_registry=registry)
+            ok = self._skill_correct(skill, pred, ep.program)
+            self.skills[skill].update(ok)
+            self.learner.observe(ep)
+            # Build context from APCN's own interpretation. During training, if
+            # the pre-learning parse failed, allow one post-update reparse; the
+            # registry never reads the teacher's entity IDs directly.
+            context_node = pred
+            if context_node is None:
+                context_node = self.learner.parse(ep.utterance, discourse_registry=registry)
+            registry.ingest(context_node)
+            result = AdaptiveStep(skill, ep, pred, ok)
+        self.last_skill = skill
+        self.last_step = result
+        assert result is not None
+        return result
