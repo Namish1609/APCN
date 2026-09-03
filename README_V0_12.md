@@ -1,25 +1,37 @@
-# APCN V0.12 — Self-Organizing Perception
+# APCN V0.12 — Self-Organizing Perception + Adaptive Correction
 
-V0.12 addresses the persistent V0.11 color/shape failure loop by changing the sensory representation rather than only adding more examples or changing the classifier.
+V0.12 addresses two persistent V0.11 failure modes by changing the representations that were limiting correction rather than simply increasing training counts:
 
-## Why V0.12 exists
+1. repeated visual confusions such as rectangle↔ellipse and square↔circle;
+2. language intent/reference mistakes that could remain sticky after thousands of lifetime cue observations.
 
-V0.11 still classified vision from a 23-dimensional engineered signal containing channel summaries, position/scale, fill/aspect and Hu-moment geometry. Error-driven consolidation could improve decision boundaries, but it could not recover visual information discarded by that front end.
+There is still **no backpropagation, gradient descent, trainable neural layer or dense learned weight stack**.
 
-V0.12 changes the primary perception path to:
+## 1. New visual representation
+
+V0.11 still classified vision from a 23-dimensional engineered signal containing channel summaries, scale/position and semantic-style geometric features such as fill/aspect and Hu moments. Error-driven consolidation could improve boundaries but could not recover information discarded by that front end.
+
+V0.12 changes the primary path to:
 
 ```text
 focused pixels
     ↓
-generic pose/scale normalization
+generic translation / scale normalization
++ coarse principal-axis pose normalization
     ↓
-raw per-channel pixel distributions
-+ normalized occupancy raster
-+ local 3x3 pixel/mask patches
+generic photometric evidence
+  • raw channel distributions
+  • continuous channel mean/std
+  • brightness-normalized chromatic mean/std
+  • joint chromaticity distribution
++
+normalized occupancy raster
++
+local 3×3 pixel/mask patches
     ↓
 unlabeled online competitive patch codebook
     ↓
-spatial codeword histogram
+global + quadrant codeword histograms
     ↓
 anonymous V0.12 feature vector
     ↓
@@ -29,59 +41,62 @@ compact grounded concept statistics
 error-driven consolidation
 ```
 
-There is still **no backpropagation, gradient descent, neural layer or dense trainable weight stack**.
+The photometric measurements do not contain named hue bins or rules such as `orange => ...`. They preserve generic continuous information so language can discover whichever dimensions predict a grounded word. Shape classification no longer depends on Hu moments, fill ratio, aspect ratio or an engineered `circle`/`rectangle` detector.
 
-## What is actually learned
+### What the patch learner stores
 
-`SelfOrganizingPatchSensor` maintains at most 24 local patch codewords. A patch is assigned to the closest codeword; sufficiently novel patches occupy unused slots, otherwise the winning prototype is updated locally with a diminishing learning rate.
+`SelfOrganizingPatchSensor` maintains at most 24 local patch codewords by default. Each observed patch competes with existing codewords. A sufficiently novel patch can occupy an unused slot; otherwise the winning aggregate prototype is updated with a diminishing local learning rate.
 
-The codebook receives only image pixels and the attention mask. It does not receive `yellow`, `rectangle`, `circle`, etc.
+The codebook receives only pixels and the attention mask. It never receives `yellow`, `rectangle`, `circle`, etc. Individual raw patches are discarded after the local update.
 
-The object descriptor then contains:
+## 2. Recent-weighted language correction
 
-- per-channel pixel histograms;
-- a low-resolution normalized occupancy raster;
-- global + quadrant histograms over learned patch-codeword IDs.
+V0.11 deliberately retained lifetime aggregate cue/construction counts. This makes knowledge stable, but it also creates a correction problem: after 12,000 observations, a few hundred targeted episodes may be numerically too weak to overturn an old ambiguous construction.
 
-The learner still sees anonymous dimensions (`f000`, `f001`, ...).
+V0.12 therefore keeps two language timescales:
 
-## Removed as primary classifier features
+```text
+stable lifetime semantic memory
+        +
+bounded recent construction calibrator
+        ↓
+intent decision
+```
 
-V0.12 does not use the V0.7-V0.11 Hu-moment/fill/aspect 23-D descriptor as the primary classifier input.
+`AdaptiveConstructionCalibrator` stores exponentially decayed intent evidence for abstract constructions such as:
 
-That does **not** mean V0.12 has zero inductive bias. It still uses:
+```text
+it is the case that <ENTITY> is <REL> the <ENTITY>
+can you determine whether <ENTITY> is <REL> the <ENTITY>
+```
 
-- an attention/focus mask;
-- translation and scale normalization;
-- coarse principal-axis pose normalization for anisotropic objects;
-- local fixed-size patches;
-- spatial pooling.
+It stores no raw sentence archive and is bounded by a configurable maximum number of abstract patterns. Recent targeted corrections can therefore matter without deleting the stable long-term language model.
 
-These are generic vision biases, not learned semantic labels. A later version can reduce these assumptions further.
+Reference identity continues to use V0.11's bounded discourse entity registry, and V0.11 error signatures for `language_program`, `language_reference` and `language_semantics` are imported into V0.12 so consolidation can immediately target known weaknesses.
 
-## V0.11 migration
+## 3. V0.11 migration
 
-The V0.11 visual distributions cannot be copied into V0.12 because the feature spaces are mathematically different.
+The V0.11 visual distributions cannot be mathematically copied into V0.12 because the feature spaces are different.
 
-V0.12 therefore migrates:
+V0.12 migrates directly:
 
-- language memory;
+- language lifetime memory;
 - definitions;
 - discourse state;
-- error signatures;
-- consolidation history;
-- the old visual episode count as provenance.
+- aggregate error signatures;
+- consolidation/language test history.
 
-It does **not** mix V0.11 23-D means/variances into V0.12 statistics.
+For vision it retains the previous visual episode count as provenance, but does **not** mix the V0.11 23-D means/variances into the new feature space. A small label-free patch-codebook bootstrap runs automatically, and the first consolidation cycle performs balanced visual grounding if any color/shape concept lacks V0.12 evidence.
 
-On first desktop launch, if `outputs/v0_12/session_v0_12.json` does not exist but `outputs/v0_11/session_v0_11.json` does, compatible V0.11 knowledge is imported automatically and a small label-free patch-codebook bootstrap is run.
+This is intentionally explicit in the UI. `5000 legacy visual experiences` and `500 new V0.12 experiences` are not presented as if they were 5500 observations in one compatible coordinate system.
 
-The first V0.12 consolidation cycle also performs balanced visual grounding automatically if the new feature space has not yet covered every color/shape concept.
+## 4. Desktop workflow
 
-## Desktop
+Development branch while V0.12 is being validated:
 
 ```bash
 cd ~/APCN
+git fetch origin
 git checkout v0.12-build
 git pull
 source .venv/bin/activate
@@ -90,16 +105,24 @@ export QT_QPA_PLATFORM=xcb
 python run_desktop_v0_12.py
 ```
 
-The UI remains based on the 1366×768 V0.11 studio. There is no additional cluttered representation-training tab. The Perception page adds a compact representation status line showing:
+The UI keeps the existing 1366×768 studio. No additional representation-training tab was added.
 
-- learned patch codewords;
-- patch updates;
-- V0.12 feature dimension;
+The Perception panel adds one compact status block showing:
+
+- patch codewords / maximum;
+- local patch updates;
+- anonymous V0.12 feature dimension;
 - new V0.12 visual evidence;
 - legacy V0.11 visual evidence;
-- missing grounded visual classes.
+- number of ungrounded visual classes.
 
-## Headless migration + training
+The existing Consolidation audit additionally shows recent language-correction patterns. The V0.12 consolidation worker writes only to `outputs/v0_12`.
+
+On first launch, if `outputs/v0_12/session_v0_12.json` does not exist but a V0.11 checkpoint does, compatible V0.11 knowledge is imported automatically.
+
+## 5. Headless workflow
+
+Migrate V0.11 knowledge and recalibrate the new visual space:
 
 ```bash
 python train_v0_12.py \
@@ -109,50 +132,70 @@ python train_v0_12.py \
   --consolidation-cycles 2
 ```
 
-If you already have a V0.12 checkpoint, omit `--from-v11`; the command resumes from `outputs/v0_12`.
+If a V0.12 checkpoint already exists, omit `--from-v11` to resume it.
 
-## Paired benchmark
+## 6. Paired V0.11 vs V0.12 benchmark
 
-V0.12 includes a paired benchmark where V0.11 and V0.12 receive exactly the same training scenes and are evaluated on identically seeded held-out scenes:
+Both versions receive exactly the same generated training episodes and identically seeded held-out distributions:
 
 ```bash
-python benchmark_v0_12.py --train 1800 --test 600 --difficulty 0.86
+python benchmark_v0_12.py --train 480 --test 150 --difficulty 0.68
 ```
 
-Do not judge V0.12 only by one aggregate score. Inspect the `shape_confusions` and `color_confusions` maps, especially:
+An early V0.12 patch-only descriptor fixed the shape errors but regressed color, which is why it was not released. After restoring generic continuous photometric information, the matched smoke benchmark produced:
 
 ```text
-rectangle -> ellipse
-ellipse -> rectangle
-square -> circle
-circle -> square
-yellow -> orange
-orange -> yellow
+                     V0.11       V0.12
+color accuracy       99.3%       100.0%
+shape accuracy       84.7%       100.0%
+joint accuracy       84.0%       100.0%
+
+V0.11 shape errors:
+  square -> circle        9
+  ellipse -> rectangle    9
+  rectangle -> ellipse    5
+
+V0.12 shape errors:       0
+V0.12 color errors:       0
 ```
 
-## Memory scaling
+This is evidence on one deterministic paired benchmark, not proof of general visual intelligence. V0.12 also includes a harder three-seed validation at difficulty 0.82:
 
-V0.12 still does not archive training images or raw local patches.
+```bash
+python validate_v0_12.py
+```
 
-Long-term visual memory is bounded by:
+The CI release gate requires strong absolute V0.12 color/shape/joint accuracy as well as no material regression relative to V0.11.
+
+## 7. Memory scaling
+
+V0.12 still does not archive all images, raw patches or sentences.
+
+Long-term memory is approximately:
 
 ```text
 small patch codebook
 + token sufficient statistics
 + bounded concept prototype banks
++ lifetime language cue/construction aggregates
++ bounded recent language calibration patterns
 + aggregate error signatures
++ sparse unified concept graph
 ```
 
-The codebook stores at most the configured number of aggregate patch prototypes; individual patches are discarded immediately after their local update.
+Experience count and retained knowledge size therefore remain deliberately separate.
 
-## Scientific release gate
+## 8. Scientific boundary
 
-V0.12 should only replace V0.11 on `main` if:
+V0.12 has substantially less semantic handcrafting in shape perception, but it still has generic inductive biases:
 
-1. the full regression suite passes;
-2. read-only testing provably does not update the patch codebook;
-3. visual memory remains bounded;
-4. moderate-difficulty color/shape learning stays above chance;
-5. paired benchmarking shows whether the persistent confusion families improve or regress.
+- attention/focus masks;
+- translation and scale normalization;
+- principal-axis pose normalization for sufficiently anisotropic objects;
+- fixed local patch size;
+- generic photometric statistics;
+- spatial pooling.
 
-The benchmark result is evidence, not a promise. If V0.12 does not improve the hard shape confusions, the correct response is to revise the representation—not hide the result by increasing training counts.
+It is not raw-pixel intelligence with zero prior structure, and a synthetic shape benchmark does not establish scalability to unrestricted real-world vision.
+
+The release question is narrower and falsifiable: **does replacing the lossy handcrafted geometry front end plus adding bounded recent correction reduce the exact persistent errors while retaining compact, non-gradient learning?**
