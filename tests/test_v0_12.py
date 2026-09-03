@@ -109,11 +109,22 @@ class TestV012(unittest.TestCase):
         self.assertGreater(conf, .5)
         self.assertLessEqual(c.summary()["patterns"], 64)
 
+    def test_recent_construction_correction_is_persistent_and_bounded(self):
+        c = AdaptiveConstructionCalibrator(decay=.9, max_patterns=24)
+        for i in range(80):
+            c.observe(f"prefix {i} <ENTITY> <REL>", "ASSERT" if i % 2 == 0 else "QUERY")
+        self.assertLessEqual(c.summary()["patterns"], 24)
+        restored = AdaptiveConstructionCalibrator.from_dict(c.to_dict())
+        self.assertEqual(restored.summary()["patterns"], c.summary()["patterns"])
+        self.assertEqual(restored.max_patterns, 24)
+
     def test_v012_ui_keeps_existing_layout_and_exposes_representation_status(self):
         text = Path("apcn_v12/ui.py").read_text(encoding="utf-8")
         self.assertIn("Self-Organizing Perception Studio", text)
         self.assertIn("Re-import V0.11 Knowledge", text)
         self.assertIn("patch codewords", text)
+        self.assertIn("recent construction observations", text)
+        self.assertIn('self.session.save("outputs/v0_12")', text)
         self.assertNotIn("addTab(self._representation", text)
 
 
