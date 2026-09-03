@@ -43,7 +43,12 @@ class CognitiveSessionV11:
     @classmethod
     def from_memories(cls, *, seed: int = 11, visual_memory: str | Path | None = None,
                       language_memory: str | Path | None = None,
-                      concept_memory: str | Path | None = None) -> "CognitiveSessionV11":
+                      concept_memory: str | Path | None = None,
+                      graph_memory: str | Path | None = None,
+                      error_memory: str | Path | None = None,
+                      discourse_memory: str | Path | None = None,
+                      session_memory: str | Path | None = None) -> "CognitiveSessionV11":
+        """Load V0.11 or migrate compatible V0.8/V0.10 compact memories."""
         obj = cls(seed)
         if visual_memory is not None and Path(visual_memory).exists():
             obj.visual = TrainingSessionV11(seed, learner=PrototypeConceptLearner.load(visual_memory))
@@ -54,7 +59,33 @@ class CognitiveSessionV11:
             obj.definitions.store = obj.concepts
             obj.definitions.index = 0
             obj.query = KnowledgeQueryEngine(obj.concepts)
+        if graph_memory is not None and Path(graph_memory).exists():
+            obj.graph = UnifiedConceptGraph.load(graph_memory)
+        if error_memory is not None and Path(error_memory).exists():
+            obj.errors = ErrorMemory.load(error_memory)
+            obj.consolidation = ConsolidationEngine(obj.errors)
+        if discourse_memory is not None and Path(discourse_memory).exists():
+            obj.language.discourse = DiscourseEntityRegistry.load(discourse_memory)
+        if session_memory is not None and Path(session_memory).exists():
+            data = json.loads(Path(session_memory).read_text(encoding="utf-8"))
+            obj.visual_test_history = list(data.get("visual_test_history", []))
+            obj.language_test_history = list(data.get("language_test_history", []))
+            obj.test_history = obj.language_test_history
         return obj
+
+    @classmethod
+    def load_checkpoint(cls, output_dir: str | Path = "outputs/v0_11", *, seed: int = 11) -> "CognitiveSessionV11":
+        out = Path(output_dir)
+        return cls.from_memories(
+            seed=seed,
+            visual_memory=out / "visual_memory_v0_11.json",
+            language_memory=out / "language_memory_v0_11.json",
+            concept_memory=out / "concept_store_v0_11.json",
+            graph_memory=out / "unified_concept_graph_v0_11.json",
+            error_memory=out / "error_memory_v0_11.json",
+            discourse_memory=out / "discourse_state_v0_11.json",
+            session_memory=out / "session_v0_11.json",
+        )
 
     def train_visual(self, experiences: int) -> None:
         for _ in range(max(0, int(experiences))):
@@ -172,7 +203,6 @@ class CognitiveSessionV11:
         return rows[:limit]
 
     def consolidate_language(self, experiences: int = 500) -> Dict[str, int]:
-        """Target intent, nested operator and reference-identity errors."""
         errors = self._language_error_targets(24)
         trained = 0
         requested = max(0, int(experiences))
