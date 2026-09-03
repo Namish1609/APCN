@@ -3,11 +3,11 @@ import argparse
 
 
 def main() -> int:
-    parser=argparse.ArgumentParser(description="APCN V0.10.1 automatic learning studio")
-    parser.add_argument("--seed",type=int,default=10)
-    args=parser.parse_args()
+    parser = argparse.ArgumentParser(description="APCN V0.10.2 automatic learning studio")
+    parser.add_argument("--seed", type=int, default=10)
+    args = parser.parse_args()
     try:
-        from apcn_v10.ui_v101 import run_app
+        from apcn_v10.ui_v102 import run_app
     except ImportError as exc:
         if "PyQt6" in str(exc):
             print("PyQt6 is not installed. Run ./install_linux.sh")
