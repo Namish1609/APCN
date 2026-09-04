@@ -128,12 +128,15 @@ class TestV012(unittest.TestCase):
         self.assertNotIn("addTab(self._representation", text)
 
     def test_v012_release_metadata_and_launcher(self):
-        version = Path("VERSION").read_text(encoding="utf-8")
-        readme = Path("README.md").read_text(encoding="utf-8")
+        # Historical-release test: later VERSION/README values are valid, while
+        # V0.12's own launcher/docs/validation gate must remain reproducible.
+        version = Path("VERSION").read_text(encoding="utf-8").splitlines()[0]
+        legacy_readme = Path("README_V0_12.md").read_text(encoding="utf-8")
         launcher = Path("run_desktop_v0_12.py").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/tests.yml").read_text(encoding="utf-8")
-        self.assertIn("0.12.0", version)
-        self.assertIn("APCN V0.12", readme)
+        major, minor, patch = (int(x) for x in version.split(".")[:3])
+        self.assertGreaterEqual((major, minor, patch), (0, 12, 0))
+        self.assertIn("APCN V0.12", legacy_readme)
         self.assertIn("apcn_v12.ui", launcher)
         self.assertIn("validate_v0_12.py", workflow)
 
