@@ -155,13 +155,16 @@ class TestV011(unittest.TestCase):
         self.assertIn("Memory + discourse audit", text)
 
     def test_v011_release_metadata_and_launcher(self):
-        version = Path("VERSION").read_text(encoding="utf-8")
+        # This is a historical-version regression. Newer releases are allowed to
+        # advance the repository VERSION/README; V0.11's own artifacts must remain.
+        version = Path("VERSION").read_text(encoding="utf-8").splitlines()[0]
         launcher = Path("run_desktop_v0_11.py").read_text(encoding="utf-8")
-        readme = Path("README.md").read_text(encoding="utf-8")
-        self.assertTrue(version.startswith("0.11.0\n"))
+        legacy_readme = Path("README_V0_11.md").read_text(encoding="utf-8")
+        major, minor, patch = (int(x) for x in version.split(".")[:3])
+        self.assertGreaterEqual((major, minor, patch), (0, 11, 0))
         self.assertIn("from apcn_v11.ui import run_app", launcher)
-        self.assertIn("APCN V0.11", readme)
-        self.assertIn("Migrate V0.10 Memory", readme)
+        self.assertIn("APCN V0.11", legacy_readme)
+        self.assertIn("Migrate V0.10 Memory", legacy_readme)
 
 
 if __name__ == "__main__":
