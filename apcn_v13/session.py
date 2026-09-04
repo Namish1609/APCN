@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple
 import json
 
-import cv2
 import numpy as np
 
 from apcn_v10.definitions import ConceptStore, DefinitionCurriculum
@@ -17,6 +16,7 @@ from apcn_v12.language import AdaptiveLanguageSessionV12, SemanticLanguageLearne
 from apcn_v12.session import CognitiveSessionV12, TrainingSessionV12
 from apcn_v12.visual import SelfOrganizingVisualLearner
 
+from .appearance import FineAppearanceEncoder
 from .world import BBox, Detection, PersistentWorldModel
 
 
@@ -26,6 +26,7 @@ class CognitiveSessionV13(CognitiveSessionV12):
     def __init__(self, seed: int = 13):
         super().__init__(seed)
         self.seed = seed
+        self.appearance = FineAppearanceEncoder()
         self.world = PersistentWorldModel()
         self.world_test_history = []
         self._last_descriptor: Optional[np.ndarray] = None
@@ -43,9 +44,9 @@ class CognitiveSessionV13(CognitiveSessionV12):
         mask[y0:y1,x0:x1] = 255
         return mask
 
-    def descriptor(self, image: np.ndarray, *, bbox: Optional[BBox] = None,
-                   attention_mask: Optional[np.ndarray] = None,
-                   adapt_representation: bool = False) -> np.ndarray:
+    def category_descriptor(self, image: np.ndarray, *, bbox: Optional[BBox] = None,
+                            attention_mask: Optional[np.ndarray] = None,
+                            adapt_representation: bool = False) -> np.ndarray:
         if attention_mask is None:
             if bbox is None:
                 raise ValueError("bbox or attention_mask is required")
@@ -53,6 +54,19 @@ class CognitiveSessionV13(CognitiveSessionV12):
         if adapt_representation:
             self.visual.learner.patch_sensor.learn(image, attention_mask)
         return self.visual.learner.patch_sensor.extract(image, attention_mask)
+
+    def descriptor(self, image: np.ndarray, *, bbox: Optional[BBox] = None,
+                   attention_mask: Optional[np.ndarray] = None,
+                   adapt_representation: bool = False) -> np.ndarray:
+        """Fine V0.13 INSTANCE descriptor.
+
+        `adapt_representation` updates only the unlabeled V0.12 patch codebook;
+        this fine appearance encoder itself has no trainable weights.
+        """
+        if adapt_representation:
+            self.category_descriptor(image, bbox=bbox, attention_mask=attention_mask,
+                                     adapt_representation=True)
+        return self.appearance.extract(image, attention_mask=attention_mask, bbox=bbox)
 
     def infer_grounded_category(self, descriptor: np.ndarray) -> Tuple[str, ...]:
         learner = self.visual.learner
@@ -62,13 +76,22 @@ class CognitiveSessionV13(CognitiveSessionV12):
         shape = learner.best_of(shapes, descriptor)[0] if learner.token_stats else None
         return tuple(x for x in (color, shape) if x)
 
+    def _resolve_category(self, image: np.ndarray, bbox: BBox,
+                          attention_mask: Optional[np.ndarray], category: Sequence[str]) -> Tuple[str, ...]:
+        supplied = tuple(str(v).lower() for v in category if str(v).strip())
+        if supplied:
+            return supplied
+        cx = self.category_descriptor(image, bbox=bbox, attention_mask=attention_mask,
+                                      adapt_representation=False)
+        return self.infer_grounded_category(cx)
+
     def teach_named_instance(self, name: str, image: np.ndarray, *, bbox: BBox,
                              category: Sequence[str] = (), timestamp: float = 0.0,
                              attention_mask: Optional[np.ndarray] = None,
                              adapt_representation: bool = False) -> Dict[str, object]:
         x = self.descriptor(image, bbox=bbox, attention_mask=attention_mask,
                             adapt_representation=adapt_representation)
-        cat = tuple(str(v).lower() for v in category) or self.infer_grounded_category(x)
+        cat = self._resolve_category(image, bbox, attention_mask, category)
         iid = self.world.teach_instance(name, x, bbox, timestamp=timestamp, category=cat)
         self._remember_working_observation(x, bbox, cat, None)
         return {"instance_id": iid, "name": name, "category": list(cat),
@@ -79,7 +102,7 @@ class CognitiveSessionV13(CognitiveSessionV12):
                        attention_mask: Optional[np.ndarray] = None,
                        occluders: Sequence[BBox] = (), auto_create: bool = True) -> Dict[str, object]:
         x = self.descriptor(image, bbox=bbox, attention_mask=attention_mask, adapt_representation=False)
-        cat = tuple(str(v).lower() for v in category) or self.infer_grounded_category(x)
+        cat = self._resolve_category(image, bbox, attention_mask, category)
         rows = self.world.process_frame([Detection(x, bbox, cat)], timestamp=timestamp,
                                         occluders=occluders, auto_create=auto_create)
         assoc = rows[0] if rows else None
@@ -121,6 +144,7 @@ class CognitiveSessionV13(CognitiveSessionV12):
     def memory_audit(self) -> Dict[str, object]:
         base = super().memory_audit()
         base["v013_world_memory"] = self.world.memory_summary()
+        base["v013_instance_appearance"] = self.appearance.summary()
         base["v013_working_descriptor_persisted"] = False
         return base
 
