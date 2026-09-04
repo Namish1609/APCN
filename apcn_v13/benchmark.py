@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict
 import json
 import random
 
@@ -9,6 +9,7 @@ import numpy as np
 
 from .session import CognitiveSessionV13
 from .temporal_teacher import SyntheticInstanceSpec, TemporalSceneTeacher
+from .world import PersistentWorldModel
 
 
 @dataclass
@@ -102,29 +103,41 @@ def run_v13_benchmark(seed: int = 13013, *, visual_bootstrap: int = 540,
             novel_ok += 1
     unknown_rejection = novel_ok / max(1,sum(novel_states.values()))
 
-    # Temporal identity + occlusion. No teacher ID is given during these frames.
-    session.world.frame_index = 0
-    x_positions = [.20,.28,.36,.43]
+    # Temporal test gets a CLEAN belief state while retaining the learned
+    # instance appearance memory. Random teaching locations/velocities must not
+    # leak into the tracking test. No teacher identity is supplied to matching.
+    learned_instances = session.world.instances
+    session.world = PersistentWorldModel(learned_instances, lost_after=9, out_of_view_after=5)
+    x_positions = [.20,.30,.40,.50]
+    temporal_matches = []
     for k,xp in enumerate(x_positions):
         frame = teacher.render(a, center=(xp,.52), scale=.33, angle=8+k*2,
                                brightness=.92, background_seed=seed+70000+k)
-        session.observe_object(frame.image, bbox=frame.bbox, category=a.category,
-                               timestamp=100+k, attention_mask=frame.attention_mask,
-                               auto_create=False)
-    occ = (.40,.28,.34,.48)
+        row = session.observe_object(frame.image, bbox=frame.bbox, category=a.category,
+                                     timestamp=100+k, attention_mask=frame.attention_mask,
+                                     auto_create=False)
+        temporal_matches.append(row.get("instance_id"))
+
+    occ = (.46,.28,.34,.48)
     occ_correct = 0
     for k in range(3):
         session.observe_absence(timestamp=104+k, occluders=[occ])
-        state = session.world.tracks[a_id].state
-        if state == "OCCLUDED": occ_correct += 1
+        track = session.world.tracks.get(a_id)
+        if track is not None and track.state == "OCCLUDED":
+            occ_correct += 1
     occlusion_accuracy = occ_correct/3.0
 
-    re_frame = teacher.render(a, center=(.64,.52), scale=.32, angle=15,
+    re_frame = teacher.render(a, center=(.70,.52), scale=.32, angle=15,
                               brightness=1.04, background_seed=seed+71000)
     re = session.observe_object(re_frame.image, bbox=re_frame.bbox, category=a.category,
                                 timestamp=108, attention_mask=re_frame.attention_mask,
                                 auto_create=False)
-    reappearance = 1.0 if re.get("instance_id") == a_id and session.world.tracks[a_id].state == "VISIBLE" else 0.0
+    reappearance = 1.0 if (
+        re.get("instance_id") == a_id and
+        a_id in session.world.tracks and
+        session.world.tracks[a_id].state == "VISIBLE" and
+        any(e.kind == "REAPPEARED" and e.instance_id == a_id for e in session.world.events)
+    ) else 0.0
 
     # Immediate human correction: penalize the wrong identity and strengthen the
     # correct one using a single current observation.
@@ -160,6 +173,7 @@ def run_v13_benchmark(seed: int = 13013, *, visual_bootstrap: int = 540,
         details={
             "per_instance": per_name,
             "novel_states": novel_states,
+            "temporal_matches": temporal_matches,
             "world_memory": mem,
             "where_after_reappearance": session.where(a.name),
             "correction_scores": {
