@@ -31,6 +31,11 @@ class SyntheticSelfFaceTeacher:
     The renderer exists only to regression-test invariance, bounded memory and
     open-set correction in CI. Real webcam performance must be measured by the
     user on their own consenting face.
+
+    The returned box follows the transformed face, analogous to a detector or a
+    user updating the focus rectangle. The identity system never receives the
+    synthetic identity seed. Small deterministic box jitter remains so the test
+    is not pixel-perfect crop matching.
     """
 
     def __init__(self, seed: int = 14141):
@@ -52,12 +57,34 @@ class SyntheticSelfFaceTeacher:
             "mark_r": r.randint(2, 5),
         }
 
+    @staticmethod
+    def _bbox_from_mask(mask: np.ndarray, rng: random.Random) -> BBox:
+        ys, xs = np.where(mask > 20)
+        h, w = mask.shape
+        if len(xs) < 20:
+            return (.15, .055, .70, .89)
+        x0, x1 = float(xs.min()), float(xs.max() + 1)
+        y0, y1 = float(ys.min()), float(ys.max() + 1)
+        bw, bh = x1-x0, y1-y0
+        # Detector-like margin plus a small amount of localization jitter.
+        pad_x, pad_y = .045*bw, .035*bh
+        x0 -= pad_x; x1 += pad_x; y0 -= pad_y; y1 += pad_y
+        jx = rng.uniform(-.012, .012) * w
+        jy = rng.uniform(-.010, .010) * h
+        scale = rng.uniform(.985, 1.018)
+        cx, cy = (x0+x1)/2 + jx, (y0+y1)/2 + jy
+        bw, bh = (x1-x0)*scale, (y1-y0)*scale
+        x0 = max(0.0, cx-bw/2); y0 = max(0.0, cy-bh/2)
+        x1 = min(float(w), cx+bw/2); y1 = min(float(h), cy+bh/2)
+        return (x0/w, y0/h, max(1.0,x1-x0)/w, max(1.0,y1-y0)/h)
+
     def render(self, identity_seed: int, view_seed: int) -> Tuple[np.ndarray, BBox]:
         p = self._identity_params(identity_seed)
         r = random.Random(view_seed)
         h = w = 220
         bg = r.randint(24, 62)
         img = np.full((h, w, 3), bg, dtype=np.uint8)
+        face_mask = np.zeros((h, w), dtype=np.uint8)
         # Neutral synthetic palette; identity signal comes mainly from geometry
         # and local structure, not skin-tone classes.
         base = r.randint(150, 205)
@@ -65,6 +92,9 @@ class SyntheticSelfFaceTeacher:
         cv2.ellipse(img, (110, 111), (70, 88), 0, 0, 360, face_color, -1, cv2.LINE_AA)
         cv2.ellipse(img, (42, 112), (10, 24), 0, 0, 360, face_color, -1, cv2.LINE_AA)
         cv2.ellipse(img, (178, 112), (10, 24), 0, 0, 360, face_color, -1, cv2.LINE_AA)
+        cv2.ellipse(face_mask, (110, 111), (70, 88), 0, 0, 360, 255, -1, cv2.LINE_AA)
+        cv2.ellipse(face_mask, (42, 112), (10, 24), 0, 0, 360, 255, -1, cv2.LINE_AA)
+        cv2.ellipse(face_mask, (178, 112), (10, 24), 0, 0, 360, 255, -1, cv2.LINE_AA)
         for sign in (-1, 1):
             ex = 110 + sign*p["eye_dx"]
             cv2.circle(img, (ex, p["eye_y"]), p["eye_r"]+3, (235,235,235), -1, cv2.LINE_AA)
@@ -92,7 +122,9 @@ class SyntheticSelfFaceTeacher:
         dx, dy = r.randint(-7,7), r.randint(-5,5)
         M = cv2.getRotationMatrix2D((110,110), angle, scale); M[:,2] += (dx,dy)
         img = cv2.warpAffine(img, M, (w,h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-        return img, (.15, .055, .70, .89)
+        face_mask = cv2.warpAffine(face_mask, M, (w,h), flags=cv2.INTER_LINEAR,
+                                   borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        return img, self._bbox_from_mask(face_mask, r)
 
 
 def _distribution(rows):
@@ -182,6 +214,7 @@ def run_face_benchmark(seed: int = 14141, *, enroll_views: int = 10,
             "false_positive_states_before_negative": false_positive_states,
             "negative_corrections": negative_rows,
             "memory": summary,
+            "locator_protocol": "face bbox tracks transformed face with small jitter; identity seed is never supplied to recognizer",
             "scientific_boundary": "procedural face-like CI diagnostic only; not real-face or security accuracy",
         },
     )
