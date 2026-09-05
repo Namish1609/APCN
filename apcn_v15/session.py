@@ -7,12 +7,8 @@ import json
 from apcn_v14.session import CognitiveSessionV14
 from .conversation import ConversationReply
 from .corpus import EnglishExposureMemory
-from .dialogue_learning import (
-    ConversationTeacherV15,
-    DialogueActLearner,
-    test_dialogue_learner,
-    train_dialogue_learner,
-)
+from .dialogue_learning import test_dialogue_learner, train_dialogue_learner
+from .dialogue_learning_v151 import ConversationTeacherV151, DialogueActLearnerV151
 from .learned_conversation import LearnedConversationEngine
 from .lexicon import FactMemory, LexicalSemanticMemory
 
@@ -30,12 +26,12 @@ class CognitiveSessionV15(CognitiveSessionV14):
         self.lexicon_v15 = LexicalSemanticMemory()
         self.facts_v15 = FactMemory()
         self.english_exposure_v15 = EnglishExposureMemory()
-        self.dialogue_learner_v15 = DialogueActLearner()
-        self.dialogue_teacher_v15 = ConversationTeacherV15(seed + 15000)
+        self.dialogue_learner_v15 = DialogueActLearnerV151()
+        self.dialogue_teacher_v15 = ConversationTeacherV151(seed + 15000)
         # Small deterministic bootstrap makes the Conversation tab usable on a
         # fresh install. Subsequent Language Only training continues improving
         # this learned dialogue memory rather than expanding parser regexes.
-        train_dialogue_learner(self.dialogue_learner_v15, self.dialogue_teacher_v15, 360)
+        train_dialogue_learner(self.dialogue_learner_v15, self.dialogue_teacher_v15, 480)
         self.v15_language_history = []
         self.conversation = self._make_conversation()
 
@@ -124,7 +120,7 @@ class CognitiveSessionV15(CognitiveSessionV14):
         return result
 
     def test_dialogue_generalization(self, samples: int = 240) -> Dict[str, object]:
-        teacher = ConversationTeacherV15(self.seed + 15111)
+        teacher = ConversationTeacherV151(self.seed + 15111)
         return test_dialogue_learner(self.dialogue_learner_v15, teacher, samples)
 
     def ingest_english_text(self, text: str) -> Dict[str, object]:
@@ -214,12 +210,12 @@ class CognitiveSessionV15(CognitiveSessionV14):
         if exposure.exists():
             obj.english_exposure_v15 = EnglishExposureMemory.load(exposure)
         if dialogue.exists():
-            obj.dialogue_learner_v15 = DialogueActLearner.load(dialogue)
+            obj.dialogue_learner_v15 = DialogueActLearnerV151.load(dialogue)
         state = out / "session_v0_15.json"
         if state.exists():
             data = json.loads(state.read_text(encoding="utf-8"))
             obj.v15_language_history = list(data.get("v15_language_history", []))[-4096:]
-        obj.dialogue_teacher_v15 = ConversationTeacherV15(seed + 15000)
+        obj.dialogue_teacher_v15 = ConversationTeacherV151(seed + 15000)
         obj.language_budget_ratio = 1.0
         obj.conversation = obj._make_conversation()
         return obj
