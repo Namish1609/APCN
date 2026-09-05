@@ -5,8 +5,8 @@ from typing import Dict
 import json
 
 from apcn_v10.semantic import semantic_equal
-from .language import AdaptiveLanguageSessionV14
 from .language_teacher import RichSemanticTeacherV14
+from .session import CognitiveSessionV14
 
 
 @dataclass
@@ -30,9 +30,9 @@ class V14LanguageBenchmark:
 
 def run_v14_language_benchmark(seed: int = 14014, *, train_steps: int = 1800,
                                 test_samples: int = 300) -> V14LanguageBenchmark:
-    session = AdaptiveLanguageSessionV14(seed)
-    for _ in range(max(1, int(train_steps))):
-        session.step()
+    cognitive = CognitiveSessionV14(seed)
+    session = cognitive.language
+    cognitive.language_first_train(max(1, int(train_steps)))
 
     teacher = RichSemanticTeacherV14(seed + 701)
     before = session.learner.episode_count
@@ -69,16 +69,14 @@ def run_v14_language_benchmark(seed: int = 14014, *, train_steps: int = 1800,
             failure_kinds[fk] = failure_kinds.get(fk, 0) + 1
     after = session.learner.episode_count
 
-    # Direct human language teaching without global retraining. An arbitrary
-    # command cue is explicitly demonstrated several times to create strong
-    # construction evidence while leaving the rest of language memory intact.
+    # Exactly ONE explicit human demonstration. V0.14 gives this event strong
+    # local construction weight without repeating full lexical co-occurrence
+    # learning, so an arbitrary function cue cannot become a phantom object word.
     base = teacher.v14_simple("GOAL", held_out=False, skill="user_paraphrase")
     words = base.utterance.split()
     custom = "zibble " + (" ".join(words[1:]) if len(words) > 1 else base.utterance)
-    for _ in range(4):
-        session.teach_user_paraphrase(custom, base.program)
-    learned = session.learner.parse(custom)
-    paraphrase_ok = 1.0 if semantic_equal(learned, base.program) else 0.0
+    taught = cognitive.teach_language_paraphrase(custom, base.program)
+    paraphrase_ok = 1.0 if taught["matched_after"] else 0.0
 
     summary = session.learner.program_constructions.summary()
     n = max(1, int(test_samples))
