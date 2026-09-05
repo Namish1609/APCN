@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 import math
 
 from apcn_v10.language_common import tokenize
-from .dialogue_learning import ConversationTeacherV15, DialogueActLearner
+from .dialogue_learning import ConversationTeacherV15, DialogueActLearner, DialogueEpisode
 
 
 class ConversationTeacherV151(ConversationTeacherV15):
@@ -131,14 +131,11 @@ class DialogueActLearnerV151(DialogueActLearner):
                 t for t in phrase.split()
                 if t not in self.STOP and not t.startswith("conceptslot")
             ]
-            # The anchor should be semantically concentrated, not a long surface
-            # sentence that merely happened to be memorized.
             if not (1 <= len(content_tokens) <= 2):
                 continue
             if purity < .86 or discrimination < .45:
                 continue
             reliability = purity * (1.0 - math.exp(-support / 3.0))
-            # Prefer high purity/support and shorter semantic anchors.
             rank = reliability * (1.05 if len(content_tokens) == 1 else 1.0)
             candidates.append((rank, support, act, reliability, cue))
         if not candidates:
@@ -152,8 +149,52 @@ class DialogueActLearnerV151(DialogueActLearner):
         anchor = self._best_anchor(text)
         if anchor is not None:
             act, reliability, cue = anchor
-            # Keep confidence calibrated below 1.0 because even a pure lexical
-            # anchor can be polysemous outside the observed training context.
             confidence = min(.94, .58 + .40 * reliability)
             return act, float(confidence), [(cue, float(reliability))]
         return super().predict(utterance, concepts)
+
+
+def balanced_bootstrap_dialogue(
+    learner: DialogueActLearnerV151,
+    teacher: ConversationTeacherV151,
+    *,
+    repeats_per_template: int = 4,
+) -> Dict[str, object]:
+    """Guarantee minimum support for every TRAIN construction, never TEST forms.
+
+    Each dialogue act receives the same number of bootstrap observations. Pools
+    with fewer templates cycle through them, so act priors stay balanced while
+    every training construction receives at least ``repeats_per_template``
+    observations. This removes random curriculum coverage as a startup failure
+    mode without leaking any held-out wording.
+    """
+    repeats_per_template = max(1, int(repeats_per_template))
+    max_templates = max(len(teacher.TRAIN[act]) for act in teacher.acts)
+    per_act = max_templates * repeats_per_template
+    concepts = teacher.CONCEPTS
+    before = learner.observations
+
+    for act_index, act in enumerate(teacher.acts):
+        pool = teacher.TRAIN[act]
+        for i in range(per_act):
+            template = pool[i % len(pool)]
+            a = concepts[(i + act_index) % len(concepts)]
+            b = concepts[(i + act_index + 1) % len(concepts)]
+            if b == a:
+                b = concepts[(i + act_index + 2) % len(concepts)]
+            utterance = template.format(a=a, b=b)
+            if act == "COMPARE":
+                slots = (a, b)
+            elif act in {"DEFINE", "DEPS", "KNOW", "ABOUT"}:
+                slots = (a,)
+            else:
+                slots = ()
+            learner.observe(DialogueEpisode(utterance, act, slots, False))
+
+    return {
+        "observations_added": learner.observations - before,
+        "per_act": per_act,
+        "acts": len(teacher.acts),
+        "held_out_examples_used": 0,
+        "summary": learner.summary(12),
+    }
