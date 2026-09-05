@@ -6,6 +6,7 @@ import sys
 from PyQt6.QtWidgets import QApplication
 
 from apcn_v15.ui import APCNV15Window
+from apcn_v15.corpus_ui import install_english_exposure_panel
 
 
 def main() -> int:
@@ -14,6 +15,7 @@ def main() -> int:
     args = parser.parse_args()
     app = QApplication(sys.argv)
     window = APCNV15Window(seed=args.seed)
+    install_english_exposure_panel(window)
     window.show()
     return app.exec()
 
