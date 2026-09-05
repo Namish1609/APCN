@@ -2,9 +2,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import numpy as np
-
-from apcn_v10.semantic import semantic_equal
 from apcn_v14.face import SelfFaceMemory
 from apcn_v14.face_benchmark import SyntheticSelfFaceTeacher, run_face_benchmark
 from apcn_v14.language import ProgramConstructionMemory
@@ -92,7 +89,7 @@ class TestV014(unittest.TestCase):
         self.assertIn("Self Face Camera", ui)
         self.assertIn("Start Camera", ui)
         self.assertIn("Verify: Is This Me?", ui)
-        self.assertIn("no neural face embedding encoder", ui)
+        self.assertIn("no pretrained neural face embedding encoder", ui)
         self.assertIn("APCNV14Window", launcher)
 
 
