@@ -1,40 +1,52 @@
-# APCN V0.11 — Unified Concept Memory + Self-Consolidation
+# APCN V0.13 — Persistent World Memory
 
-Current release: **0.11.0**.
+Current release: **0.13.0**.
 
-APCN V0.11 moves the project from manually repeating large training batches toward an explicit self-diagnosis and consolidation loop:
+V0.13 extends the V0.12 self-organizing perception system from generic visual concepts into **persistent object instances and temporal world belief**. The implementation remains non-neural: no backpropagation, gradient descent, trainable neural layers, or dense learned weight stack.
+
+## What V0.13 adds
 
 ```text
-read-only test
-    ↓
-aggregate recurring errors
-    ↓
-rank weak concept boundaries / language constructions
-    ↓
-generate targeted contrast experiences
-    ↓
-consolidate compact memory
-    ↓
-read-only retest
+focused pixels / camera frame
+        │
+        ├── V0.12 category representation
+        │      └─ color / shape / generic concepts
+        │
+        └── V0.13 fine instance representation
+               └─ local texture / chromatic layout / edges / occupancy
+                        │
+                        ▼
+             bounded multi-view instance memory
+                        │
+          appearance + category + temporal continuity
+                        │
+        KNOWN / PROBABLE / AMBIGUOUS / NOVEL
+                        │
+                        ▼
+              PersistentWorldModel
+              ├─ VISIBLE
+              ├─ OCCLUDED
+              ├─ OUT_OF_VIEW
+              └─ LOST
+                        │
+                        ▼
+        trajectories + events + belief-based `where`
 ```
 
-It remains non-neural in the current implementation: no backpropagation, gradient descent, trainable neural layers or dense learned weight stack.
+A named object such as `my_bottle` stores only bounded aggregate appearance prototypes. Raw camera/video frames are working memory and are not written into the APCN checkpoint.
 
-## V0.11 highlights
+Default instance-memory bound:
 
-- bounded multi-prototype visual concepts instead of a single centroid per word;
-- aggregate error memory instead of retaining every failure;
-- automatic non-gradient consolidation prescriptions;
-- learned sentence-construction induction;
-- persistent discourse entity registry for `it`, `that object`, and stable instance identity;
-- stricter identity-aware reference testing;
-- unified sparse concept graph linking perception, language and definitions;
-- idempotent graph synchronization—viewing the graph cannot change knowledge;
-- V0.10 compact-memory migration without replaying old images or sentences;
-- persistent error/discourse/consolidation state across restarts;
-- new **Consolidation** desktop page with priorities, memory audit, concept graph and before→after curves.
+```text
+positive appearance modes <= 8 / instance
+negative correction modes <= 4 / instance
+raw images retained       = 0
+raw video retained        = 0
+```
 
-## Update and run the desktop studio
+V0.13 also supports immediate human identity correction. A correction adds compact negative evidence to the wrong instance and positive evidence to the correct instance; it does not retrain a global model.
+
+## Desktop camera and World Memory
 
 ```bash
 cd ~/APCN
@@ -43,76 +55,39 @@ git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_11.py
+python run_desktop_v0_13.py
 ```
 
-The UI remains designed for a 1366×768 desktop and retains the Perception, Language, Definitions, Ask APCN and Testing Ground pages from V0.10.2.
+Open **World Memory**. You can load an image or start camera device `0`, freeze a frame, define the normalized focus box, teach a persistent name such as `my_bottle`, observe later views, correct a wrong identity, mark absence/occlusion, and ask **Where is it?**.
 
-## Continue from your V0.10 training
+The camera currently uses a manually specified focus box. This is intentional: V0.13 tests persistent identity/world memory separately from unrestricted open-world detection.
 
-If you already trained V0.10, open the **Consolidation** tab and click:
+## Recognition semantics
 
-```text
-Migrate V0.10 Memory
-```
+V0.13 uses open-set evidence rather than a single nearest-neighbour threshold.
 
-The normal migration paths are:
+- **KNOWN** — strong absolute appearance evidence and separation from competitors.
+- **PROBABLE** — enough combined appearance/margin evidence to commit identity with uncertainty.
+- **AMBIGUOUS** — candidate evidence exists, but identity is deliberately non-committing and cannot silently update a track.
+- **NOVEL** — insufficient evidence for an existing instance.
 
-```text
-outputs/v0_10/perception/concept_memory_v0_8.json
-outputs/v0_10/language_memory_v0_10.json
-outputs/v0_10/concept_store_v0_10.json
-```
+Temporal belief is separate from object identity. A known instance can be `VISIBLE`, `OCCLUDED`, `OUT_OF_VIEW`, or `LOST` while retaining its persistent identity memory.
 
-V0.11 converts those compact memories; it does not need the original thousands of images or sentences.
+## Testing
 
-Then click:
-
-```text
-Run 1 Automatic Consolidation Cycle
-```
-
-The cycle performs diagnosis → targeted visual/language learning → retesting and shows the before/after curves.
-
-## Headless consolidation
+Run the V0.13 unit tests and controlled persistent-instance benchmark:
 
 ```bash
-python train_v0_11.py \
-  --visual-memory outputs/v0_10/perception/concept_memory_v0_8.json \
-  --language-memory outputs/v0_10/language_memory_v0_10.json \
-  --concept-memory outputs/v0_10/concept_store_v0_10.json \
-  --visual 0 \
-  --language 0 \
-  --consolidation-cycles 3 \
-  --definitions
+python -m unittest tests.test_v0_13 -v
+python benchmark_v0_13.py
 ```
 
-Or start a clean V0.11 experiment:
+The benchmark teaches two visually similar instances sharing the same coarse category and evaluates held-out multi-view identity, similar-instance disambiguation, unknown rejection, occlusion, reappearance, one-step correction, and bounded memory. Ground-truth identity is used only by the evaluator and is not passed to read-only matching.
 
-```bash
-python train_v0_11.py \
-  --visual 2000 \
-  --language 3200 \
-  --visual-test 500 \
-  --language-test 600 \
-  --definitions \
-  --consolidation-cycles 2
-```
+The full GitHub Actions suite also preserves the historical V0.7–V0.12 tests and V0.12 hard perception gate.
 
-## What is stored?
+## Scientific boundary
 
-The visual learner does **not** retain all training images. Long-term visual memory is compact sufficient statistics plus a bounded prototype bank. The language learner does **not** retain all training sentences; it retains aggregate cue/ngram/semantic counts and induced construction statistics. Error memory collapses repeated mistakes into bounded signatures and the discourse registry is bounded working memory.
+V0.13 does **not** claim solved open-world object detection, unrestricted video understanding, human-action recognition, or biometric face identification. It establishes the narrower mechanism needed by HUD: `this observed object now = that persistent object seen earlier`, with explicit uncertainty, bounded memory, and no full-model retraining.
 
-## Tests
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-See [`README_V0_11.md`](README_V0_11.md) for the full V0.11 architecture, migration workflow and scientific boundaries.
-
-## Current scientific boundary
-
-V0.11 does **not** establish that APCN scales to general intelligence or replaces transformers. The visual front end still uses the engineered anonymous 23-dimensional sensor. The V0.11 experiment is whether compact explicit knowledge can diagnose and target its own weaknesses without gradients or an unbounded episode archive.
-
-A likely next major research direction is self-organizing perception from more generic local pixel structure rather than indefinitely improving the handcrafted sensor.
+Historical release documentation remains available in `README_V0_12.md`, `README_V0_11.md`, and earlier version files.

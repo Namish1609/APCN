@@ -1,0 +1,30 @@
+name: APCN V0.13 fast gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apcn_v13/**'
+      - 'tests/test_v0_13.py'
+      - 'benchmark_v0_13.py'
+      - 'validate_v0_13.py'
+      - '.github/workflows/v13-fast.yml'
+
+jobs:
+  v13-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install headless dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-headless.txt
+      - name: Compile V0.13
+        run: python -m compileall -q apcn_v13
+      - name: V0.13 unit tests
+        run: python -m unittest tests.test_v0_13 -v
+      - name: V0.13 persistent instance benchmark
+        run: python benchmark_v0_13.py
