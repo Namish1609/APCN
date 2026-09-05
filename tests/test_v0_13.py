@@ -50,6 +50,22 @@ class TestV013(unittest.TestCase):
         self.assertEqual(world.tracks[inst.instance_id].state, "VISIBLE")
         self.assertTrue(any(e.kind == "REAPPEARED" for e in world.events))
 
+    def test_ambiguous_identity_does_not_commit_or_auto_create(self):
+        mem = InstanceMemory(max_views=3, strong_threshold=2.0, probable_threshold=.5, ambiguity_margin=.5)
+        a = np.zeros(32, dtype=float)
+        b = np.ones(32, dtype=float) * .02
+        mem.teach("a", a, category=("thing",))
+        mem.teach("b", b, category=("thing",))
+        probe = np.ones(32, dtype=float) * .01
+        match = mem.match(probe, category=("thing",))
+        self.assertEqual(match.state, "AMBIGUOUS")
+        self.assertIsNone(match.instance_id)
+        before = len(mem.instances)
+        world = PersistentWorldModel(mem)
+        rows = world.process_frame([Detection(probe, (.3,.3,.2,.2), ("thing",))], timestamp=1.0, auto_create=True)
+        self.assertEqual(rows, [])
+        self.assertEqual(len(mem.instances), before)
+
     def test_where_answer_never_uses_simulator_truth(self):
         mem = InstanceMemory(max_views=3, strong_threshold=.2, probable_threshold=.1, ambiguity_margin=.0)
         x = np.arange(30,dtype=float)/30.0
@@ -82,6 +98,10 @@ class TestV013(unittest.TestCase):
         self.assertIn("Observe / Match", text)
         self.assertIn("Correct Current Observation To Name", text)
         self.assertIn("Where is it?", text)
+        self.assertIn("Start Camera", text)
+        self.assertIn("Freeze Frame", text)
+        self.assertIn("cv2.VideoCapture", text)
+        self.assertIn("does not implement biometric face identity", text)
 
 
 if __name__ == "__main__":
