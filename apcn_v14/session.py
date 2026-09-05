@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 import json
 
+import numpy as np
+
+from apcn_v10.semantic import semantic_equal
 from apcn_v11.consolidation import ConsolidationEngine
 from apcn_v13.session import CognitiveSessionV13
-from .face import SelfFaceMemory
+from .face import BBox, SelfFaceMemory
 from .language import AdaptiveLanguageSessionV14, SemanticLanguageLearnerV14
+from .language_teacher import RichSemanticTeacherV14
 
 
 class CognitiveSessionV14(CognitiveSessionV13):
@@ -18,8 +22,12 @@ class CognitiveSessionV14(CognitiveSessionV13):
         self.seed = seed
         self.language = AdaptiveLanguageSessionV14(seed)
         self.self_face = SelfFaceMemory()
+        # V0.14 deliberately stops treating perception as the only scaling
+        # bottleneck. Most automatic learning budget now goes to language while
+        # perception/world memory remains an active grounded test bed.
         self.language_budget_ratio = .80
         self.v14_language_history = []
+        self.v14_face_history = []
 
     @staticmethod
     def _adopt_v13_state(obj: "CognitiveSessionV14", old: CognitiveSessionV13) -> None:
@@ -67,7 +75,7 @@ class CognitiveSessionV14(CognitiveSessionV13):
             "skill_mix": skills,
             "program_constructions": self.language.learner.program_constructions.summary(8),
         }
-        self.v14_language_history.append(result)
+        self.v14_language_history.append({"kind": "train", **result})
         return result
 
     def mixed_priority_train(self, total_steps: int = 500) -> Dict[str, object]:
@@ -83,6 +91,64 @@ class CognitiveSessionV14(CognitiveSessionV13):
             visual_added = self.visual.learner.episode_count-before
         return {"total_steps":total_steps,"language_ratio":self.language_budget_ratio,
                 "language":lang,"visual_experiences_added":visual_added}
+
+    def test_rich_language(self, samples: int = 180, *, seed_offset: int = 1701) -> Dict[str, object]:
+        """Read-only held-out construction test on the CURRENT language memory."""
+        samples = max(1, int(samples))
+        teacher = RichSemanticTeacherV14(self.seed + int(seed_offset))
+        before = self.language.learner.episode_count
+        exact = intent = relation = operator = 0
+        failures = []
+        for i in range(samples):
+            ep = teacher.held_out_construction(i)
+            pred = self.language.learner.parse(ep.utterance, discourse_registry=self.language.discourse)
+            ok = semantic_equal(pred, ep.program)
+            exact += int(ok)
+            intent += int(pred is not None and pred.intent() == ep.program.intent())
+            relation += int(pred is not None and pred.relations() == ep.program.relations())
+            operator += int(pred is not None and pred.operators() == ep.program.operators())
+            if not ok and len(failures) < 12:
+                failures.append({
+                    "utterance": ep.utterance,
+                    "expected": ep.program.pretty(),
+                    "predicted": pred.pretty() if pred is not None else None,
+                    "construction_evidence": dict(self.language.learner.last_program_evidence),
+                })
+        after = self.language.learner.episode_count
+        report = {
+            "samples": samples,
+            "exact": exact/samples,
+            "intent": intent/samples,
+            "relation": relation/samples,
+            "operator": operator/samples,
+            "memory_frozen": before == after,
+            "episodes": after,
+            "program_patterns": self.language.learner.program_constructions.summary(8),
+            "failures": failures,
+        }
+        self.v14_language_history.append({"kind": "test", **{k:v for k,v in report.items() if k != "failures"}})
+        return report
+
+    # ---- opt-in local self-face API -------------------------------------------------
+    # These methods deliberately support ONE user-enrolled local identity. They do
+    # not perform public-person lookup or infer demographic attributes.
+    def face_auto_bbox(self, frame: np.ndarray) -> Optional[BBox]:
+        return self.self_face.auto_bbox(frame)
+
+    def enroll_self_face(self, name: str, frame: np.ndarray, bbox: BBox) -> Dict[str, object]:
+        row = self.self_face.enroll(name, frame, bbox)
+        self.v14_face_history.append({"kind": "enroll", "name": row["name"], "views": row["views"]})
+        return row
+
+    def recognize_self_face(self, frame: np.ndarray, bbox: BBox) -> Dict[str, object]:
+        row = self.self_face.recognize(frame, bbox)
+        self.v14_face_history.append({"kind": "verify", "state": row.get("state"), "score": row.get("score", 0.0), "match": row.get("match", False)})
+        return row
+
+    def mark_face_not_me(self, frame: np.ndarray, bbox: BBox) -> Dict[str, object]:
+        row = self.self_face.mark_not_me(frame, bbox)
+        self.v14_face_history.append({"kind": "negative", **row})
+        return row
 
     def memory_audit(self) -> Dict[str, object]:
         base = super().memory_audit()
@@ -106,6 +172,7 @@ class CognitiveSessionV14(CognitiveSessionV13):
             "seed": self.seed,
             "language_budget_ratio": self.language_budget_ratio,
             "v14_language_history": self.v14_language_history,
+            "v14_face_history": self.v14_face_history,
             "memory_audit": self.memory_audit(),
         }, indent=2), encoding="utf-8")
         return {"base_v13":str(base_dir),"language":str(language_path),"discourse":str(discourse_path),"self_face":str(face_path),"session":str(state_path)}
@@ -127,5 +194,8 @@ class CognitiveSessionV14(CognitiveSessionV13):
         if fp.exists(): obj.self_face = SelfFaceMemory.load(fp)
         sp = out / "session_v0_14.json"
         if sp.exists():
-            data=json.loads(sp.read_text(encoding="utf-8")); obj.language_budget_ratio=float(data.get("language_budget_ratio",.80)); obj.v14_language_history=list(data.get("v14_language_history",[]))
+            data=json.loads(sp.read_text(encoding="utf-8"))
+            obj.language_budget_ratio=float(data.get("language_budget_ratio",.80))
+            obj.v14_language_history=list(data.get("v14_language_history",[]))
+            obj.v14_face_history=list(data.get("v14_face_history",[]))
         obj.sync_graph(); return obj
