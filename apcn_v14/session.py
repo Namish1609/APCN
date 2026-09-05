@@ -6,7 +6,8 @@ import json
 
 import numpy as np
 
-from apcn_v10.semantic import semantic_equal
+from apcn_v10.language_common import LanguageEpisode
+from apcn_v10.semantic import EntityRef, SemanticNode, semantic_equal
 from apcn_v11.consolidation import ConsolidationEngine
 from apcn_v13.session import CognitiveSessionV13
 from .face import BBox, SelfFaceMemory
@@ -91,6 +92,39 @@ class CognitiveSessionV14(CognitiveSessionV13):
             visual_added = self.visual.learner.episode_count-before
         return {"total_steps":total_steps,"language_ratio":self.language_budget_ratio,
                 "language":lang,"visual_experiences_added":visual_added}
+
+    def teach_language_paraphrase(self, utterance: str, program: SemanticNode,
+                                  discourse_focus: Optional[EntityRef] = None) -> Dict[str, object]:
+        """One explicit human demonstration with strong LOCAL construction weight.
+
+        A repeated full `learner.observe()` on the same sentence/content would
+        incorrectly make a new function word look like a color/shape/relation
+        merely because it co-occurs with one scene. V0.14 therefore records the
+        ordinary lexical experience ONCE, then strengthens only the aligned
+        program-construction memory. This is analogous to a high-confidence
+        correction, not global retraining.
+        """
+        text = str(utterance).strip()
+        if not text:
+            raise ValueError("paraphrase is empty")
+        learner = self.language.learner
+        before = learner.parse(text, discourse_focus, discourse_registry=self.language.discourse)
+        episode = LanguageEpisode(text, program, "user_paraphrase", discourse_focus=discourse_focus)
+        learner.observe(episode)  # one normal language experience only
+        # One human demonstration is treated as stronger evidence than one
+        # procedural exposure, but only inside the bounded construction store.
+        for _ in range(3):
+            learner.program_constructions.observe(learner, episode)
+        after = learner.parse(text, discourse_focus, discourse_registry=self.language.discourse)
+        row = {
+            "utterance": text,
+            "matched_before": semantic_equal(before, program),
+            "matched_after": semantic_equal(after, program),
+            "predicted_after": after.pretty() if after is not None else None,
+            "construction_evidence": dict(learner.last_program_evidence),
+        }
+        self.v14_language_history.append({"kind": "explicit_paraphrase", **row})
+        return row
 
     def test_rich_language(self, samples: int = 180, *, seed_offset: int = 1701) -> Dict[str, object]:
         """Read-only held-out construction test on the CURRENT language memory."""
