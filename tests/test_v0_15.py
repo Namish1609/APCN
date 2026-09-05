@@ -61,19 +61,41 @@ class TestV015(unittest.TestCase):
         self.assertEqual(s.visual.learner.episode_count, before)
         self.assertGreater(row["experiences_added"], 0)
 
-    def test_conversational_memories_persist_without_raw_chat(self):
+    def test_english_exposure_is_bounded_surface_memory_not_semantics(self):
+        s = self._session()
+        text = (
+            "A small robot learns language from repeated examples. "
+            "The robot asks questions when a phrase is unfamiliar. "
+            "Repeated language gives the robot surface familiarity."
+        )
+        row = s.ingest_english_text(text)
+        self.assertGreater(row["tokens_added"], 10)
+        self.assertFalse(row["semantic_learning"])
+        self.assertFalse(row["raw_text_retained"])
+        self.assertGreater(s.english_exposure_v15.familiarity("robot"), 0)
+        self.assertFalse(s.concepts.understanding("robot").get("known"))
+        summary = s.english_exposure_v15.summary()
+        self.assertEqual(summary["raw_documents_retained"], 0)
+        self.assertEqual(summary["raw_sentences_retained"], 0)
+
+    def test_conversational_memories_persist_without_raw_chat_or_corpus(self):
         s = self._session()
         s.talk("fluxion means acceleration")
         s.talk("remember that orbix is a sensor")
         s.talk("hello")
+        corpus = "A quasar can appear bright because it releases enormous energy."
+        s.ingest_english_text(corpus)
         with tempfile.TemporaryDirectory() as td:
             s.save(td)
             restored = CognitiveSessionV15.load_checkpoint(td, seed=15001)
             self.assertEqual(restored.lexicon_v15.resolve("fluxion")[0], "acceleration")
             self.assertEqual(restored.facts_v15.first_is_a("orbix").object, "sensor")
+            self.assertGreater(restored.english_exposure_v15.familiarity("quasar"), 0)
             state = Path(td, "session_v0_15.json").read_text(encoding="utf-8")
+            exposure = Path(td, "english_exposure_v0_15.json").read_text(encoding="utf-8")
             self.assertNotIn("fluxion means acceleration", state)
             self.assertNotIn("remember that orbix is a sensor", state)
+            self.assertNotIn(corpus, exposure)
             self.assertFalse(restored.conversation_memory_audit()["raw_chat_transcript_persisted"])
 
     def test_conversation_benchmark(self):
@@ -88,11 +110,14 @@ class TestV015(unittest.TestCase):
     def test_v15_ui_surface_is_language_only(self):
         ui = Path("apcn_v15/ui.py").read_text(encoding="utf-8")
         launcher = Path("run_desktop_v0_15.py").read_text(encoding="utf-8")
+        corpus_ui = Path("apcn_v15/corpus_ui.py").read_text(encoding="utf-8")
         self.assertIn("Conversation", ui)
         self.assertIn("Train Language Only", ui)
         self.assertIn("visual training budget = 0%", ui)
         self.assertIn("Self Face Camera", ui)  # removal of inherited tab is explicit
         self.assertIn("APCNV15Window", launcher)
+        self.assertIn("install_english_exposure_panel", launcher)
+        self.assertIn("English Exposure", corpus_ui)
 
 
 if __name__ == "__main__":
