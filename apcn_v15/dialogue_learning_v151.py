@@ -39,6 +39,7 @@ class ConversationTeacherV151(ConversationTeacherV15):
         "COMPARE": ConversationTeacherV15.TRAIN["COMPARE"] + (
             "what makes {a} different from {b}",
             "set {a} against {b} and explain the contrast",
+            "set {a} next to {b} for comparison",
         ),
         "FOLLOW_DEPS": ConversationTeacherV15.TRAIN["FOLLOW_DEPS"] + (
             "what is it based on",
