@@ -164,6 +164,11 @@ class InstanceMemory:
 
     Matching combines appearance, optional category compatibility and a spatial
     continuity prior from the world model. There is no gradient optimization.
+
+    V0.13 uses open-set evidence rather than one absolute threshold. A difficult
+    familiar view may have only moderate absolute similarity but still be much
+    better than every competing identity. Conversely, an unseen object can have
+    a moderate nearest-neighbour score but a tiny best-vs-second margin.
     """
 
     def __init__(self, *, max_views: int = 8, strong_threshold: float = .58,
@@ -237,20 +242,42 @@ class InstanceMemory:
         rows.sort(key=lambda r: r[0], reverse=True)
         if not rows:
             return IdentityMatch(None, None, 0.0, 0.0, "NOVEL", 0.0, .5)
+
         best = rows[0]
         second = rows[1][0] if len(rows) > 1 else 0.0
         margin = best[0] - second
-        if best[0] >= self.strong_threshold and margin >= self.ambiguity_margin:
+
+        # Two independent routes to a committed identity:
+        # 1) strong absolute similarity, or
+        # 2) moderate similarity plus decisive separation from competitors.
+        strong_absolute = best[0] >= self.strong_threshold and margin >= self.ambiguity_margin
+        ordinary_probable = (
+            best[0] >= self.probable_threshold and
+            margin >= self.ambiguity_margin * .60
+        )
+        margin_rescue = (
+            len(rows) > 1 and
+            best[0] >= self.probable_threshold * .68 and
+            margin >= self.ambiguity_margin * 1.55
+        )
+
+        if strong_absolute:
             state = "KNOWN"
-        elif best[0] >= self.probable_threshold and margin >= self.ambiguity_margin * .6:
+        elif ordinary_probable or margin_rescue:
             state = "PROBABLE"
-        elif best[0] >= self.probable_threshold * .8:
+        elif best[0] >= self.probable_threshold * .62:
             state = "AMBIGUOUS"
         else:
             state = "NOVEL"
-        return IdentityMatch(best[3].instance_id if state != "NOVEL" else None,
-                             best[3].name if state != "NOVEL" else None,
-                             best[0], margin, state, best[1], best[2])
+
+        # AMBIGUOUS is deliberately non-committing. It can inform diagnostics,
+        # but it must not silently update a persistent track or appearance bank.
+        committed = state in {"KNOWN", "PROBABLE"}
+        return IdentityMatch(
+            best[3].instance_id if committed else None,
+            best[3].name if committed else None,
+            best[0], margin, state, best[1], best[2]
+        )
 
     def reinforce(self, instance_id: str, descriptor: np.ndarray) -> None:
         self.instances[instance_id].positive.observe(descriptor)
