@@ -18,13 +18,30 @@ _SLOT_RE = re.compile(r"^<([ER])(\d+)>$")
 
 
 class ProgramConstructionMemory:
-    """Sparse bounded surface-construction -> semantic-program memory."""
+    """Sparse bounded surface-construction -> semantic-program memory.
+
+    V0.14 deliberately factorizes language evidence instead of treating a full
+    sentence pattern as an indivisible template:
+
+      * `pattern_schema` remembers exact surface constructions;
+      * `skeleton_schema` remembers the ordered semantic slot structure after
+        lexical material is removed;
+      * `cue_root` learns which residual lexical cues predict the ROOT semantic
+        operation (ASSERT/QUERY/GOAL/GROUP/SEQUENCE/NEGATE).
+
+    This lets a held-out paraphrase reuse a learned semantic skeleton even when
+    much of its wording is new. All three memories are streaming aggregates;
+    raw training sentences are not archived as episodes.
+    """
 
     VERSION = "APCN-V0.14-PROGRAM-CONSTRUCTION-MEMORY"
 
     def __init__(self, max_patterns: int = 4096):
         self.max_patterns = int(max_patterns)
         self.pattern_schema: DefaultDict[str, CounterType[str]] = defaultdict(Counter)
+        self.skeleton_schema: DefaultDict[str, CounterType[str]] = defaultdict(Counter)
+        self.cue_root: DefaultDict[str, CounterType[str]] = defaultdict(Counter)
+        self.root_totals: CounterType[str] = Counter()
         self.touches: CounterType[str] = Counter()
         self.observations = 0
         self.skipped_unaligned = 0
@@ -88,6 +105,8 @@ class ProgramConstructionMemory:
         tokens=tokenize(utterance); entities=learner._entity_mentions(tokens); relations=self._relation_spans(learner,tokens)
         if len(entities)<2 or not relations: return None
         desc=[(m[2].color,m[2].shape) for m in entities]
+        # Duplicate descriptions cannot currently be numbered safely without
+        # discourse/instance evidence, so do not pretend they are aligned.
         if len(set(desc)) != len(desc): return None
         pattern=self._numbered_pattern(tokens,entities,relations)
         if program is None: return pattern,entities,relations,None
@@ -100,6 +119,13 @@ class ProgramConstructionMemory:
     @staticmethod
     def _schema_key(schema: Dict[str,object]) -> str:
         return json.dumps(schema,sort_keys=True,separators=(",",":"))
+
+    @staticmethod
+    def _schema_root(key_or_schema) -> str:
+        if isinstance(key_or_schema, str):
+            try: return str(json.loads(key_or_schema).get("op", ""))
+            except Exception: return ""
+        return str(key_or_schema.get("op", ""))
 
     @staticmethod
     def _decision(counter: CounterType[str]):
@@ -127,6 +153,30 @@ class ProgramConstructionMemory:
         return e,r
 
     @classmethod
+    def _slot_skeleton(cls, pattern: str) -> str:
+        """Ordered semantic slots only; lexical words are intentionally removed."""
+        slots=[]
+        for tok in pattern.split():
+            m=_SLOT_RE.match(tok)
+            if m: slots.append(f"<{m.group(1)}>")
+        return " ".join(slots)
+
+    @staticmethod
+    def _lexical_cues(pattern: str, max_n: int = 3) -> List[str]:
+        """Residual lexical n-grams that do not cross semantic slot boundaries."""
+        cues=set(); segment=[]
+        def flush():
+            if not segment: return
+            for n in range(1,min(max_n,len(segment))+1):
+                for i in range(len(segment)-n+1): cues.add(" ".join(segment[i:i+n]))
+            segment.clear()
+        for tok in pattern.split():
+            if _SLOT_RE.match(tok): flush()
+            else: segment.append(tok)
+        flush()
+        return sorted(cues)
+
+    @classmethod
     def _similarity(cls,a: str,b: str) -> float:
         if cls._slot_counts(a)!=cls._slot_counts(b): return 0.0
         aa,bb=cls._generic_tokens(a),cls._generic_tokens(b)
@@ -134,14 +184,81 @@ class ProgramConstructionMemory:
         jac=len(la&lb)/len(union) if union else 1.0
         return float(.74*seq+.26*jac)
 
+    def _root_vote(self, pattern: str):
+        total_roots=max(1,sum(self.root_totals.values()))
+        scores: Dict[str,float]=defaultdict(float)
+        supports: Dict[str,float]=defaultdict(float)
+        evidence=[]
+        for cue in self._lexical_cues(pattern):
+            row=self.cue_root.get(cue)
+            if not row: continue
+            total=sum(row.values())
+            if total < 3: continue
+            phrase_bonus=1.0+.10*(len(cue.split())-1)
+            for root,count in row.items():
+                purity=count/total
+                baseline=self.root_totals.get(root,0)/total_roots
+                discrimination=max(0.0,purity-baseline)
+                if discrimination <= .04: continue
+                weight=discrimination*math.log1p(count)*phrase_bonus
+                scores[root]+=weight; supports[root]+=count
+                evidence.append((weight,cue,root,purity,count))
+        if not scores: return None,0.0,""
+        ordered=sorted(((v,k) for k,v in scores.items()),reverse=True)
+        top,root=ordered[0]; second=ordered[1][0] if len(ordered)>1 else 0.0
+        ratio=top/max(top+second,1e-9)
+        support_factor=1.0-math.exp(-supports[root]/7.0)
+        conf=float(ratio*(.70+.30*support_factor))
+        best=sorted((x for x in evidence if x[2]==root),reverse=True)[:3]
+        evidence_text=" + ".join(x[1] for x in best)
+        return root,conf,evidence_text
+
+    def _factorized_predict(self, pattern: str):
+        skeleton=self._slot_skeleton(pattern)
+        counter=self.skeleton_schema.get(skeleton)
+        if not counter: return None,0.0,""
+        root,root_conf,root_evidence=self._root_vote(pattern)
+
+        # If lexical evidence identifies a root operation, choose the dominant
+        # schema of that root within the learned slot skeleton.
+        if root is not None:
+            subset=Counter({k:v for k,v in counter.items() if self._schema_root(k)==root})
+            if subset:
+                key,struct_conf,support=self._decision(subset)
+                if key is not None and support>=3:
+                    conf=float(.58*root_conf+.42*struct_conf)
+                    if conf>=.54:
+                        return json.loads(key),conf,f"factorized {skeleton} | root={root} via {root_evidence}"
+
+        # Some structures are themselves highly diagnostic. Example: a learned
+        # three-entity shared-object coordination skeleton may overwhelmingly map
+        # to GROUP even when the held-out coordination words are new. This is a
+        # learned distribution, not a hardcoded entity-count rule.
+        key,struct_conf,support=self._decision(counter)
+        if key is not None and support>=8 and struct_conf>=.72:
+            return json.loads(key),float(struct_conf),f"structural {skeleton}"
+        return None,0.0,""
+
     def observe(self, learner, episode: LanguageEpisode) -> bool:
         aligned=self.align(learner,episode.utterance,episode.program)
         if aligned is None: self.skipped_unaligned+=1; return False
-        pattern,_,_,schema=aligned; key=self._schema_key(schema)
-        self.pattern_schema[pattern][key]+=1; self.touches[pattern]+=1; self.observations+=1
+        pattern,_,_,schema=aligned; key=self._schema_key(schema); root=self._schema_root(schema)
+        self.pattern_schema[pattern][key]+=1; self.touches[pattern]+=1
+        skeleton=self._slot_skeleton(pattern)
+        if skeleton: self.skeleton_schema[skeleton][key]+=1
+        if root:
+            self.root_totals[root]+=1
+            for cue in self._lexical_cues(pattern): self.cue_root[cue][root]+=1
+        self.observations+=1
         if len(self.pattern_schema)>self.max_patterns:
             ranked=sorted(self.pattern_schema,key=lambda p:(self.touches[p],sum(self.pattern_schema[p].values())))
             for p in ranked[:len(self.pattern_schema)-self.max_patterns]: self.pattern_schema.pop(p,None); self.touches.pop(p,None)
+        # Auxiliary aggregate tables are bounded indirectly by the finite
+        # retained pattern vocabulary. Prune weak lexical rows if necessary.
+        max_cues=self.max_patterns*8
+        if len(self.cue_root)>max_cues:
+            ranked=sorted(self.cue_root,key=lambda c:sum(self.cue_root[c].values()))
+            for c in ranked[:len(self.cue_root)-max_cues]: self.cue_root.pop(c,None)
         return True
 
     def predict(self, learner, utterance: str):
@@ -151,6 +268,11 @@ class ProgramConstructionMemory:
         if exact:
             key,conf,support=self._decision(exact)
             if key is not None and support>=2: return json.loads(key),conf,pattern,(entities,relations)
+
+        factorized,fac_conf,fac_evidence=self._factorized_predict(pattern)
+        if factorized is not None:
+            return factorized,fac_conf,fac_evidence,(entities,relations)
+
         candidates=[]
         for known,counter in self.pattern_schema.items():
             key,conf,support=self._decision(counter)
@@ -182,17 +304,38 @@ class ProgramConstructionMemory:
             key,conf,support=self._decision(counter)
             if key is not None: rows.append((conf,support,pattern,json.loads(key)))
         rows.sort(reverse=True)
-        return {"version":self.VERSION,"observations":self.observations,"patterns":len(self.pattern_schema),"max_patterns":self.max_patterns,"skipped_unaligned":self.skipped_unaligned,
-                "strongest":[{"pattern":p,"confidence":c,"support":s,"schema":schema} for c,s,p,schema in rows[:limit]]}
+        roots=[]
+        for cue,counter in self.cue_root.items():
+            key,conf,support=self._decision(counter)
+            if key is not None and support>=3: roots.append((conf,support,cue,key))
+        roots.sort(reverse=True)
+        return {
+            "version":self.VERSION,"observations":self.observations,"patterns":len(self.pattern_schema),"max_patterns":self.max_patterns,
+            "skeletons":len(self.skeleton_schema),"root_cues":len(self.cue_root),"skipped_unaligned":self.skipped_unaligned,
+            "root_totals":dict(self.root_totals),
+            "strongest":[{"pattern":p,"confidence":c,"support":s,"schema":schema} for c,s,p,schema in rows[:limit]],
+            "strongest_root_cues":[{"cue":cue,"root":root,"confidence":conf,"support":support} for conf,support,cue,root in roots[:limit]],
+        }
 
     def to_dict(self) -> Dict[str,object]:
         return {"version":self.VERSION,"max_patterns":self.max_patterns,"observations":self.observations,"skipped_unaligned":self.skipped_unaligned,
-                "pattern_schema":{k:dict(v) for k,v in self.pattern_schema.items()},"touches":dict(self.touches)}
+                "pattern_schema":{k:dict(v) for k,v in self.pattern_schema.items()},
+                "skeleton_schema":{k:dict(v) for k,v in self.skeleton_schema.items()},
+                "cue_root":{k:dict(v) for k,v in self.cue_root.items()},"root_totals":dict(self.root_totals),"touches":dict(self.touches)}
 
     @classmethod
     def from_dict(cls,data: Dict[str,object]) -> "ProgramConstructionMemory":
         obj=cls(int(data.get("max_patterns",4096))); obj.observations=int(data.get("observations",0)); obj.skipped_unaligned=int(data.get("skipped_unaligned",0))
-        obj.pattern_schema=defaultdict(Counter,{k:Counter({x:int(y) for x,y in v.items()}) for k,v in data.get("pattern_schema",{}).items()}); obj.touches=Counter({k:int(v) for k,v in data.get("touches",{}).items()})
+        obj.pattern_schema=defaultdict(Counter,{k:Counter({x:int(y) for x,y in v.items()}) for k,v in data.get("pattern_schema",{}).items()})
+        obj.skeleton_schema=defaultdict(Counter,{k:Counter({x:int(y) for x,y in v.items()}) for k,v in data.get("skeleton_schema",{}).items()})
+        obj.cue_root=defaultdict(Counter,{k:Counter({x:int(y) for x,y in v.items()}) for k,v in data.get("cue_root",{}).items()})
+        obj.root_totals=Counter({k:int(v) for k,v in data.get("root_totals",{}).items()}); obj.touches=Counter({k:int(v) for k,v in data.get("touches",{}).items()})
+        # Backward-compatible migration: older V0.14 checkpoints only had exact
+        # pattern_schema. Reconstruct factorized aggregate views from those rows.
+        if not obj.skeleton_schema:
+            for pattern,counter in obj.pattern_schema.items():
+                sk=obj._slot_skeleton(pattern)
+                for key,count in counter.items(): obj.skeleton_schema[sk][key]+=count
         return obj
 
 
