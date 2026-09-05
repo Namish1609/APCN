@@ -6,6 +6,7 @@ import json
 
 from apcn_v14.session import CognitiveSessionV14
 from .conversation import ConversationEngine, ConversationReply
+from .corpus import EnglishExposureMemory
 from .lexicon import FactMemory, LexicalSemanticMemory
 
 
@@ -21,6 +22,7 @@ class CognitiveSessionV15(CognitiveSessionV14):
         self.language_budget_ratio = 1.0
         self.lexicon_v15 = LexicalSemanticMemory()
         self.facts_v15 = FactMemory()
+        self.english_exposure_v15 = EnglishExposureMemory()
         self.v15_language_history = []
         self.conversation = self._make_conversation()
 
@@ -85,10 +87,32 @@ class CognitiveSessionV15(CognitiveSessionV14):
         })
         return result
 
+    def ingest_english_text(self, text: str) -> Dict[str, object]:
+        """Expose APCN to English surface statistics without asserting semantics."""
+        row = self.english_exposure_v15.ingest(text)
+        self.v15_language_history.append({"kind": "english_exposure", **row})
+        if len(self.v15_language_history) > 4096:
+            del self.v15_language_history[: len(self.v15_language_history) - 4096]
+        return {
+            **row,
+            "semantic_learning": False,
+            "raw_text_retained": False,
+            "note": "surface familiarity only; semantic meaning still requires grounding/definition/demonstration",
+        }
+
+    def english_coverage(self, text: str) -> Dict[str, object]:
+        semantic_terms = set(self.concepts.records)
+        semantic_terms.update(self.lexicon_v15.aliases)
+        semantic_terms.update(self.lexicon_v15.aliases[k].target for k in self.lexicon_v15.aliases)
+        semantic_terms.update(r.subject for r in self.facts_v15.facts.values())
+        semantic_terms.update(r.object for r in self.facts_v15.facts.values())
+        return self.english_exposure_v15.coverage(text, semantic_terms)
+
     def conversation_memory_audit(self) -> Dict[str, object]:
         return {
             "lexicon": self.lexicon_v15.summary(16),
             "facts": self.facts_v15.summary(16),
+            "english_exposure": self.english_exposure_v15.summary(16),
             "conversation": self.conversation.summary(),
             "raw_chat_transcript_persisted": False,
             "language_budget_ratio": 1.0,
@@ -106,9 +130,11 @@ class CognitiveSessionV15(CognitiveSessionV14):
         super().save(base)
         lex = out / "lexicon_v0_15.json"
         facts = out / "facts_v0_15.json"
+        exposure = out / "english_exposure_v0_15.json"
         state = out / "session_v0_15.json"
         self.lexicon_v15.save(lex)
         self.facts_v15.save(facts)
+        self.english_exposure_v15.save(exposure)
         state.write_text(json.dumps({
             "version": self.VERSION,
             "seed": self.seed,
@@ -116,7 +142,13 @@ class CognitiveSessionV15(CognitiveSessionV14):
             "v15_language_history": self.v15_language_history,
             "memory_audit": self.conversation_memory_audit(),
         }, indent=2), encoding="utf-8")
-        return {"base_v14": str(base), "lexicon": str(lex), "facts": str(facts), "session": str(state)}
+        return {
+            "base_v14": str(base),
+            "lexicon": str(lex),
+            "facts": str(facts),
+            "english_exposure": str(exposure),
+            "session": str(state),
+        }
 
     @classmethod
     def load_checkpoint(cls, output_dir: str | Path = "outputs/v0_15", *, seed: int = 15) -> "CognitiveSessionV15":
@@ -129,10 +161,13 @@ class CognitiveSessionV15(CognitiveSessionV14):
         cls._adopt_v14_state(obj, old)
         lex = out / "lexicon_v0_15.json"
         facts = out / "facts_v0_15.json"
+        exposure = out / "english_exposure_v0_15.json"
         if lex.exists():
             obj.lexicon_v15 = LexicalSemanticMemory.load(lex)
         if facts.exists():
             obj.facts_v15 = FactMemory.load(facts)
+        if exposure.exists():
+            obj.english_exposure_v15 = EnglishExposureMemory.load(exposure)
         state = out / "session_v0_15.json"
         if state.exists():
             data = json.loads(state.read_text(encoding="utf-8"))
