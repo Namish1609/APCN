@@ -13,6 +13,7 @@ class TestV015(unittest.TestCase):
             s.concepts.add_primitive(name, grounded=True)
         s.concepts.learn_definition("speed is distance divided by time")
         s.concepts.learn_definition("acceleration is velocity change divided by time")
+        s.concepts.learn_definition("density is mass divided by volume")
         return s
 
     def test_multiturn_definition_dependencies_and_why(self):
@@ -26,6 +27,29 @@ class TestV015(unittest.TestCase):
         r3 = s.talk("why?")
         self.assertEqual(r3.act, "ANSWER_PROVENANCE")
         self.assertIn("acceleration", r3.text.lower())
+
+    def test_learned_dialogue_handles_heldout_surface_forms(self):
+        s = self._session()
+        a = s.talk("how would you define acceleration")
+        self.assertEqual(a.act, "ANSWER_DEFINITION")
+        self.assertIn("velocity change", a.text.lower())
+        b = s.talk("which ideas feed into acceleration")
+        self.assertEqual(b.act, "ANSWER_DEPENDENCIES")
+        self.assertIn("time", b.text.lower())
+        c = s.talk("would you say you understand density")
+        self.assertEqual(c.act, "ANSWER_KNOWLEDGE")
+        d = s.talk("set speed beside density conceptually")
+        self.assertEqual(d.act, "ANSWER_COMPARE")
+        self.assertIn("speed", d.text.lower())
+        self.assertIn("density", d.text.lower())
+
+    def test_dialogue_classifier_generalizes_read_only(self):
+        s = self._session()
+        before = s.dialogue_learner_v15.observations
+        rep = s.test_dialogue_generalization(240)
+        self.assertTrue(rep["memory_frozen"])
+        self.assertEqual(s.dialogue_learner_v15.observations, before)
+        self.assertGreaterEqual(rep["accuracy"], .70)
 
     def test_user_can_teach_alias_and_use_it_immediately(self):
         s = self._session()
@@ -60,6 +84,8 @@ class TestV015(unittest.TestCase):
         self.assertEqual(row["visual_experiences_added"], 0)
         self.assertEqual(s.visual.learner.episode_count, before)
         self.assertGreater(row["experiences_added"], 0)
+        self.assertGreater(row["dialogue_steps"], 0)
+        self.assertGreater(row["grounded_semantic_steps"], 0)
 
     def test_english_exposure_is_bounded_surface_memory_not_semantics(self):
         s = self._session()
@@ -85,12 +111,14 @@ class TestV015(unittest.TestCase):
         s.talk("hello")
         corpus = "A quasar can appear bright because it releases enormous energy."
         s.ingest_english_text(corpus)
+        before_dialogue = s.dialogue_learner_v15.observations
         with tempfile.TemporaryDirectory() as td:
             s.save(td)
             restored = CognitiveSessionV15.load_checkpoint(td, seed=15001)
             self.assertEqual(restored.lexicon_v15.resolve("fluxion")[0], "acceleration")
             self.assertEqual(restored.facts_v15.first_is_a("orbix").object, "sensor")
             self.assertGreater(restored.english_exposure_v15.familiarity("quasar"), 0)
+            self.assertEqual(restored.dialogue_learner_v15.observations, before_dialogue)
             state = Path(td, "session_v0_15.json").read_text(encoding="utf-8")
             exposure = Path(td, "english_exposure_v0_15.json").read_text(encoding="utf-8")
             self.assertNotIn("fluxion means acceleration", state)
@@ -102,6 +130,8 @@ class TestV015(unittest.TestCase):
         rep = run_conversation_benchmark(seed=15002)
         self.assertGreaterEqual(rep.act_accuracy, .85)
         self.assertGreaterEqual(rep.required_content_accuracy, .80)
+        self.assertGreaterEqual(rep.heldout_dialogue_act_accuracy, .70)
+        self.assertGreaterEqual(rep.heldout_interactive_accuracy, .70)
         self.assertEqual(rep.unknown_honesty, 1.0)
         self.assertEqual(rep.learned_memory_accuracy, 1.0)
         self.assertGreaterEqual(rep.followup_accuracy, .80)
