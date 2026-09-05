@@ -63,21 +63,17 @@ class SyntheticSelfFaceTeacher:
         base = r.randint(150, 205)
         face_color = (base, min(240, base + 8), min(245, base + 15))
         cv2.ellipse(img, (110, 111), (70, 88), 0, 0, 360, face_color, -1, cv2.LINE_AA)
-        # ears
         cv2.ellipse(img, (42, 112), (10, 24), 0, 0, 360, face_color, -1, cv2.LINE_AA)
         cv2.ellipse(img, (178, 112), (10, 24), 0, 0, 360, face_color, -1, cv2.LINE_AA)
-        # eyes + brows
         for sign in (-1, 1):
             ex = 110 + sign*p["eye_dx"]
             cv2.circle(img, (ex, p["eye_y"]), p["eye_r"]+3, (235,235,235), -1, cv2.LINE_AA)
             cv2.circle(img, (ex, p["eye_y"]), p["eye_r"], (35,35,35), -1, cv2.LINE_AA)
             y0 = p["eye_y"] - 17
             cv2.line(img, (ex-13, y0-sign*p["brow"]//3), (ex+13, y0+sign*p["brow"]//3), (55,55,55), 3, cv2.LINE_AA)
-        # nose + mouth
         cv2.line(img, (110, 94), (108 + p["brow"]//3, 94+p["nose"]), (90,90,90), 3, cv2.LINE_AA)
         cv2.line(img, (108+p["brow"]//3, 94+p["nose"]), (117, 120), (90,90,90), 2, cv2.LINE_AA)
         cv2.ellipse(img, (110, p["mouth_y"]), (p["mouth_w"], 10+r.randint(-2,3)), 0, 8, 172, (65,65,65), 3, cv2.LINE_AA)
-        # persistent local mark and identity-specific micro layout
         cv2.circle(img, (p["mark_x"], p["mark_y"]), p["mark_r"], (70,70,70), -1, cv2.LINE_AA)
         rr = random.Random(identity_seed + 1000)
         for _ in range(12):
@@ -92,14 +88,31 @@ class SyntheticSelfFaceTeacher:
         img = np.clip(img.astype(np.float32)*gain + bias, 0, 255).astype(np.uint8)
         if r.random() < .35:
             img = cv2.GaussianBlur(img, (3,3), r.uniform(.2, .8))
-        angle = r.uniform(-9.0, 9.0)
-        scale = r.uniform(.94, 1.05)
+        angle = r.uniform(-9.0, 9.0); scale = r.uniform(.94, 1.05)
         dx, dy = r.randint(-7,7), r.randint(-5,5)
-        M = cv2.getRotationMatrix2D((110,110), angle, scale)
-        M[:,2] += (dx,dy)
+        M = cv2.getRotationMatrix2D((110,110), angle, scale); M[:,2] += (dx,dy)
         img = cv2.warpAffine(img, M, (w,h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT_101)
-        bbox = (.15, .055, .70, .89)
-        return img, bbox
+        return img, (.15, .055, .70, .89)
+
+
+def _distribution(rows):
+    scores = np.asarray([float(x.get("score", 0.0)) for x in rows], dtype=np.float64)
+    appearances = np.asarray([float(x.get("appearance_score", 0.0)) for x in rows], dtype=np.float64)
+    states: Dict[str, int] = {}
+    for x in rows:
+        state = str(x.get("state", "?")); states[state] = states.get(state, 0) + 1
+    if len(scores) == 0:
+        return {"states": states}
+    return {
+        "states": states,
+        "score_mean": float(scores.mean()),
+        "score_min": float(scores.min()),
+        "score_p10": float(np.quantile(scores, .10)),
+        "score_median": float(np.median(scores)),
+        "score_p90": float(np.quantile(scores, .90)),
+        "score_max": float(scores.max()),
+        "appearance_mean": float(appearances.mean()),
+    }
 
 
 def run_face_benchmark(seed: int = 14141, *, enroll_views: int = 10,
@@ -113,27 +126,30 @@ def run_face_benchmark(seed: int = 14141, *, enroll_views: int = 10,
         frame, bbox = teacher.render(self_seed, seed + 100 + i)
         memory.enroll("me", frame, bbox)
 
-    self_ok = 0
+    self_rows = []
     for i in range(test_views):
         frame, bbox = teacher.render(self_seed, seed + 10000 + i)
-        self_ok += int(memory.recognize(frame, bbox).get("match", False))
+        self_rows.append(memory.recognize(frame, bbox))
+    self_ok = sum(int(x.get("match", False)) for x in self_rows)
 
-    unknown_ok_before = 0
+    unknown_before = []
     for i in range(test_views):
         frame, bbox = teacher.render(unknown_seed, seed + 20000 + i)
-        unknown_ok_before += int(not memory.recognize(frame, bbox).get("match", False))
+        unknown_before.append(memory.recognize(frame, bbox))
+    unknown_ok_before = sum(int(not x.get("match", False)) for x in unknown_before)
 
+    negative_rows = []
     for i in range(negative_examples):
         frame, bbox = teacher.render(unknown_seed, seed + 30000 + i)
-        memory.mark_not_me(frame, bbox)
+        negative_rows.append(memory.mark_not_me(frame, bbox))
 
-    unknown_ok_after = 0
+    unknown_after = []
     for i in range(test_views):
         frame, bbox = teacher.render(unknown_seed, seed + 40000 + i)
-        unknown_ok_after += int(not memory.recognize(frame, bbox).get("match", False))
+        unknown_after.append(memory.recognize(frame, bbox))
+    unknown_ok_after = sum(int(not x.get("match", False)) for x in unknown_after)
 
-    summary = memory.summary()
-    inst = summary["instance_memory"]
+    summary = memory.summary(); inst = summary["instance_memory"]
     bounded = (
         inst["positive_prototypes"] <= inst["max_views_per_instance"] and
         inst["negative_prototypes"] <= 4 and
@@ -142,6 +158,15 @@ def run_face_benchmark(seed: int = 14141, *, enroll_views: int = 10,
         summary["raw_face_images_retained"] == 0 and
         summary["raw_camera_frames_retained"] == 0
     )
+    false_negative_states: Dict[str, int] = {}
+    for x in self_rows:
+        if not x.get("match", False):
+            st = str(x.get("state", "?")); false_negative_states[st] = false_negative_states.get(st, 0) + 1
+    false_positive_states: Dict[str, int] = {}
+    for x in unknown_before:
+        if x.get("match", False):
+            st = str(x.get("state", "?")); false_positive_states[st] = false_positive_states.get(st, 0) + 1
+
     return FaceBenchmarkResult(
         enroll_views=enroll_views,
         self_acceptance=self_ok/max(1,test_views),
@@ -150,6 +175,12 @@ def run_face_benchmark(seed: int = 14141, *, enroll_views: int = 10,
         bounded_memory_ok=bool(bounded),
         raw_frames_retained=0,
         details={
+            "self_distribution": _distribution(self_rows),
+            "unknown_before_distribution": _distribution(unknown_before),
+            "unknown_after_distribution": _distribution(unknown_after),
+            "false_negative_states": false_negative_states,
+            "false_positive_states_before_negative": false_positive_states,
+            "negative_corrections": negative_rows,
             "memory": summary,
             "scientific_boundary": "procedural face-like CI diagnostic only; not real-face or security accuracy",
         },
