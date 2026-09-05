@@ -90,7 +90,16 @@ class TestV014(unittest.TestCase):
         self.assertIn("Start Camera", ui)
         self.assertIn("Verify: Is This Me?", ui)
         self.assertIn("no pretrained neural face embedding encoder", ui)
-        self.assertIn("APCNV14Window", launcher)
+        self.assertIn("APCNV14LaunchWindow", launcher)
+
+    def test_v14_launcher_header_is_safe_during_legacy_constructor_chain(self):
+        wrapper = Path("apcn_v14/launch_window.py").read_text(encoding="utf-8")
+        launcher = Path("run_desktop_v0_14.py").read_text(encoding="utf-8")
+        self.assertIn("APCNV14LaunchWindow", launcher)
+        self.assertIn('getattr(cognitive, "errors", None)', wrapper)
+        self.assertIn('getattr(cognitive, "world", None)', wrapper)
+        self.assertIn('getattr(self, "cognitive", None)', wrapper)
+        self.assertNotIn("self.cognitive.errors", wrapper)
 
 
 if __name__ == "__main__":
