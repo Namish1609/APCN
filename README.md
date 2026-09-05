@@ -1,49 +1,52 @@
-# APCN V0.12 — Self-Organizing Perception + Adaptive Correction
+# APCN V0.13 — Persistent World Memory
 
-Current release: **0.12.0**.
+Current release: **0.13.0**.
 
-V0.12 addresses the persistent V0.11 error loop by changing two limiting representations rather than simply increasing training volume:
+V0.13 extends the V0.12 self-organizing perception system from generic visual concepts into **persistent object instances and temporal world belief**. The implementation remains non-neural: no backpropagation, gradient descent, trainable neural layers, or dense learned weight stack.
 
-- visual shape concepts now use a less-handcrafted pixel/patch representation instead of the old 23-D Hu/fill/aspect geometry summary;
-- language adds a bounded recent-evidence construction calibrator so targeted corrections can matter after thousands of lifetime observations.
-
-It remains non-neural in the current implementation: **no backpropagation, gradient descent, trainable neural layers or dense learned weight stack**.
-
-## What changed
-
-The V0.12 perception path is:
+## What V0.13 adds
 
 ```text
-focused pixels
-    ↓
-generic normalization
-    ↓
-generic photometric evidence
-+ normalized occupancy raster
-+ local pixel/mask patches
-    ↓
-unlabeled online competitive patch codebook
-    ↓
-spatial codeword representation
-    ↓
-compact concept statistics + bounded prototypes
+focused pixels / camera frame
+        │
+        ├── V0.12 category representation
+        │      └─ color / shape / generic concepts
+        │
+        └── V0.13 fine instance representation
+               └─ local texture / chromatic layout / edges / occupancy
+                        │
+                        ▼
+             bounded multi-view instance memory
+                        │
+          appearance + category + temporal continuity
+                        │
+        KNOWN / PROBABLE / AMBIGUOUS / NOVEL
+                        │
+                        ▼
+              PersistentWorldModel
+              ├─ VISIBLE
+              ├─ OCCLUDED
+              ├─ OUT_OF_VIEW
+              └─ LOST
+                        │
+                        ▼
+        trajectories + events + belief-based `where`
 ```
 
-The patch codebook is bounded and label-free. It never receives words such as `circle`, `rectangle`, `yellow` or `orange`. Shape classification no longer relies on Hu moments, fill ratio or aspect ratio.
+A named object such as `my_bottle` stores only bounded aggregate appearance prototypes. Raw camera/video frames are working memory and are not written into the APCN checkpoint.
 
-Language now combines:
+Default instance-memory bound:
 
 ```text
-stable lifetime cue/construction memory
-        +
-bounded recent construction correction
+positive appearance modes <= 8 / instance
+negative correction modes <= 4 / instance
+raw images retained       = 0
+raw video retained        = 0
 ```
 
-so known errors such as `ASSERT→GOAL`, `QUERY→ASSERT` and nested `NEGATE>ASSERT→NEGATE>GOAL` can receive meaningful targeted corrective evidence without deleting long-term knowledge.
+V0.13 also supports immediate human identity correction. A correction adds compact negative evidence to the wrong instance and positive evidence to the correct instance; it does not retrain a global model.
 
-V0.11's error memory, discourse entity registry, unified concept graph and automatic consolidation loop remain in place.
-
-## Update and run
+## Desktop camera and World Memory
 
 ```bash
 cd ~/APCN
@@ -52,102 +55,39 @@ git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_12.py
+python run_desktop_v0_13.py
 ```
 
-The UI remains based on the existing **1366×768** studio. V0.12 does not add another cluttered representation-training tab. The Perception panel shows a compact representation status and the existing Consolidation page shows learning priorities, memory audit, concept graph, recent language correction state and before→after curves.
+Open **World Memory**. You can load an image or start camera device `0`, freeze a frame, define the normalized focus box, teach a persistent name such as `my_bottle`, observe later views, correct a wrong identity, mark absence/occlusion, and ask **Where is it?**.
 
-## Migration from V0.11
+The camera currently uses a manually specified focus box. This is intentional: V0.13 tests persistent identity/world memory separately from unrestricted open-world detection.
 
-On first V0.12 launch, if `outputs/v0_12/session_v0_12.json` does not exist but `outputs/v0_11/session_v0_11.json` does, compatible V0.11 knowledge is imported automatically.
+## Recognition semantics
 
-Directly migrated:
+V0.13 uses open-set evidence rather than a single nearest-neighbour threshold.
 
-- language lifetime memory;
-- definitions;
-- discourse state;
-- aggregate error signatures;
-- consolidation/test history.
+- **KNOWN** — strong absolute appearance evidence and separation from competitors.
+- **PROBABLE** — enough combined appearance/margin evidence to commit identity with uncertainty.
+- **AMBIGUOUS** — candidate evidence exists, but identity is deliberately non-committing and cannot silently update a track.
+- **NOVEL** — insufficient evidence for an existing instance.
 
-The V0.11 visual means/variances are **not** copied into V0.12 because the feature spaces are incompatible. Their episode count is retained as provenance, a small label-free patch-codebook bootstrap runs, and the first consolidation cycle automatically builds balanced V0.12 visual evidence before using known confusion signatures for targeted contrasts.
+Temporal belief is separate from object identity. A known instance can be `VISIBLE`, `OCCLUDED`, `OUT_OF_VIEW`, or `LOST` while retaining its persistent identity memory.
 
-After launch, the recommended first action is:
+## Testing
 
-```text
-Consolidation → Run 1 Automatic Consolidation Cycle
-```
-
-## Tested perception result
-
-Paired V0.11/V0.12 tests use exactly the same training scenes and identically seeded held-out distributions.
-
-Smoke benchmark, 480 training experiences / 150 tests / difficulty 0.68:
-
-```text
-                     V0.11       V0.12
-color                99.3%       100.0%
-shape                84.7%       100.0%
-joint                84.0%       100.0%
-```
-
-V0.11 produced repeated `square→circle`, `ellipse→rectangle` and `rectangle→ellipse` errors. V0.12 produced no visual errors in that matched run.
-
-Hard three-seed gate, 720 training experiences / 180 tests per seed / difficulty 0.82:
-
-```text
-mean                 V0.11       V0.12
-color                99.44%      98.15%
-shape                90.93%      99.81%
-joint                90.37%      97.96%
-```
-
-Across 540 V0.12 hard held-out scenes there was one shape error (`triangle→ellipse`); the repeated rectangle↔ellipse and square↔circle failures were absent. V0.12 therefore trades a small amount of hard-regime color accuracy for a much larger shape/joint improvement in this synthetic benchmark.
-
-These results are **not** proof of general real-world vision or general intelligence; they are evidence that the new representation addresses the specific synthetic perception bottleneck that persisted in V0.11.
-
-## Headless experiments
-
-Migrate V0.11 and continue:
+Run the V0.13 unit tests and controlled persistent-instance benchmark:
 
 ```bash
-python train_v0_12.py \
-  --from-v11 \
-  --visual 1600 \
-  --language 0 \
-  --consolidation-cycles 2
+python -m unittest tests.test_v0_13 -v
+python benchmark_v0_13.py
 ```
 
-Run the matched benchmark:
+The benchmark teaches two visually similar instances sharing the same coarse category and evaluates held-out multi-view identity, similar-instance disambiguation, unknown rejection, occlusion, reappearance, one-step correction, and bounded memory. Ground-truth identity is used only by the evaluator and is not passed to read-only matching.
 
-```bash
-python benchmark_v0_12.py --train 480 --test 150 --difficulty 0.68
-```
+The full GitHub Actions suite also preserves the historical V0.7–V0.12 tests and V0.12 hard perception gate.
 
-Run the three-seed hard gate:
+## Scientific boundary
 
-```bash
-python validate_v0_12.py
-```
+V0.13 does **not** claim solved open-world object detection, unrestricted video understanding, human-action recognition, or biometric face identification. It establishes the narrower mechanism needed by HUD: `this observed object now = that persistent object seen earlier`, with explicit uncertainty, bounded memory, and no full-model retraining.
 
-Run all regressions:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-## Memory model
-
-V0.12 still does not retain every image, local patch or sentence. Long-term state consists primarily of:
-
-```text
-bounded patch codebook
-+ visual sufficient statistics
-+ bounded visual concept prototypes
-+ lifetime language cue/construction aggregates
-+ bounded recent language corrections
-+ aggregate error signatures
-+ sparse concept graph
-+ bounded discourse working memory
-```
-
-See `README_V0_12.md` for the architecture, migration boundary, benchmarks and scientific limitations.
+Historical release documentation remains available in `README_V0_12.md`, `README_V0_11.md`, and earlier version files.
