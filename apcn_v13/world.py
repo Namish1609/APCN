@@ -196,7 +196,11 @@ class PersistentWorldModel:
             created = False
             if iid in assigned:
                 iid = None
-            if iid is None and auto_create:
+
+            # AMBIGUOUS is a hypothesis, not an identity commitment. It must not
+            # create a new persistent object or update an existing track. Only a
+            # genuinely NOVEL observation may auto-create a new unnamed instance.
+            if iid is None and auto_create and match.state == "NOVEL":
                 inst = self.instances.create(category=det.category)
                 inst.positive.observe(det.descriptor)
                 iid = inst.instance_id
@@ -204,6 +208,7 @@ class PersistentWorldModel:
                 created = True
             if iid is None:
                 continue
+
             assigned.add(iid)
             inst = self.instances.instances[iid]
             # Only self-reinforce reasonably confident re-identifications. This
