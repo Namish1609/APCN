@@ -7,7 +7,7 @@ import time
 import cv2
 import numpy as np
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap, QFont
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
@@ -92,6 +92,14 @@ class APCNV13Window(APCNV12Window):
         self._world_path = ""
         self._world_clock = time.time()
 
+        # Camera frames are working state only. They are never written into the
+        # APCN checkpoint; only compact descriptors/world beliefs are retained.
+        self._camera = None
+        self._camera_index = 0
+        self._camera_timer = QTimer(self)
+        self._camera_timer.setInterval(66)
+        self._camera_timer.timeout.connect(self._camera_tick)
+
         self.c_migrate.setText("Re-import V0.12 Knowledge")
         self.p_hint.setText(
             "V0.13 keeps V0.12 self-organizing perception and adds bounded multi-view INSTANCE memory, "
@@ -106,8 +114,8 @@ class APCNV13Window(APCNV12Window):
         title = QLabel("Persistent Object / World Memory")
         title.setFont(QFont("Sans Serif", 14, 800)); outer.addWidget(title)
         hint = QLabel(
-            "Load a real image/frame, define a normalized focus box, teach a persistent name, then use later frames to observe/match. "
-            "Long-term memory stores bounded appearance prototypes and world beliefs—not the loaded images.")
+            "Load a real image or use a live desktop camera, define a normalized focus box, teach a persistent object name, then observe/match later frames. "
+            "Long-term memory stores bounded appearance prototypes and world beliefs—not camera frames. Camera mode is for object/world-memory testing and does not implement biometric face identity.")
         hint.setWordWrap(True); outer.addWidget(hint)
 
         split = QSplitter(Qt.Orientation.Horizontal); outer.addWidget(split, 1)
@@ -115,7 +123,7 @@ class APCNV13Window(APCNV12Window):
         right = QWidget(); rl = QVBoxLayout(right); split.addWidget(right)
         split.setSizes([520,720])
 
-        self.w_preview = QLabel("Load an image/frame")
+        self.w_preview = QLabel("Load an image/frame or start camera")
         self.w_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.w_preview.setMinimumHeight(260)
         self.w_preview.setStyleSheet("border:1px solid #445; background:#101318")
@@ -123,25 +131,32 @@ class APCNV13Window(APCNV12Window):
 
         box = QGroupBox("Observation controls"); grid = QGridLayout(box); ll.addWidget(box)
         self.w_load = QPushButton("Load Image / Frame"); self.w_load.clicked.connect(self._world_load)
-        grid.addWidget(self.w_load,0,0,1,2)
-        self.w_name = QLineEdit(); self.w_name.setPlaceholderText("persistent name, e.g. my_bottle")
+        self.w_cam_start = QPushButton("Start Camera"); self.w_cam_start.clicked.connect(self._camera_start)
+        self.w_cam_freeze = QPushButton("Freeze Frame"); self.w_cam_freeze.clicked.connect(self._camera_freeze)
+        self.w_cam_stop = QPushButton("Stop Camera"); self.w_cam_stop.clicked.connect(self._camera_stop)
+        grid.addWidget(self.w_load,0,0); grid.addWidget(self.w_cam_start,0,1)
+        grid.addWidget(self.w_cam_freeze,0,2); grid.addWidget(self.w_cam_stop,0,3)
+        self.w_cam_status = QLabel("camera: stopped")
+        self.w_cam_status.setWordWrap(True); grid.addWidget(self.w_cam_status,1,0,1,4)
+
+        self.w_name = QLineEdit(); self.w_name.setPlaceholderText("persistent object name, e.g. my_bottle")
         self.w_category = QLineEdit(); self.w_category.setPlaceholderText("optional category, e.g. bottle")
-        grid.addWidget(QLabel("Name"),1,0); grid.addWidget(self.w_name,1,1)
-        grid.addWidget(QLabel("Category"),2,0); grid.addWidget(self.w_category,2,1)
+        grid.addWidget(QLabel("Name"),2,0); grid.addWidget(self.w_name,2,1,1,3)
+        grid.addWidget(QLabel("Category"),3,0); grid.addWidget(self.w_category,3,1,1,3)
 
         self.w_box = []
         for col,(label,val) in enumerate((("x",.20),("y",.20),("w",.60),("h",.60))):
             sp = QDoubleSpinBox(); sp.setRange(0.0,1.0); sp.setDecimals(3); sp.setSingleStep(.02); sp.setValue(val)
             sp.valueChanged.connect(self._world_preview_refresh); self.w_box.append(sp)
-            grid.addWidget(QLabel(label),3,col*2 if col < 2 else (col-2)*2)
-            grid.addWidget(sp,3 if col < 2 else 4,(col*2+1) if col < 2 else ((col-2)*2+1))
+            grid.addWidget(QLabel(label),4,col*2 if col < 2 else (col-2)*2)
+            grid.addWidget(sp,4 if col < 2 else 5,(col*2+1) if col < 2 else ((col-2)*2+1))
         self.w_teach = QPushButton("Teach Named Instance"); self.w_teach.clicked.connect(self._world_teach)
         self.w_observe = QPushButton("Observe / Match (no learning label)"); self.w_observe.clicked.connect(self._world_observe)
         self.w_correct = QPushButton("Correct Current Observation To Name"); self.w_correct.clicked.connect(self._world_correct)
-        grid.addWidget(self.w_teach,5,0,1,2); grid.addWidget(self.w_observe,6,0,1,2); grid.addWidget(self.w_correct,7,0,1,2)
+        grid.addWidget(self.w_teach,6,0,1,4); grid.addWidget(self.w_observe,7,0,1,4); grid.addWidget(self.w_correct,8,0,1,4)
         self.w_occluded = QCheckBox("missing frame is due to an occluder near current box")
         self.w_missing = QPushButton("No Detection This Frame"); self.w_missing.clicked.connect(self._world_missing)
-        grid.addWidget(self.w_occluded,8,0,1,2); grid.addWidget(self.w_missing,9,0,1,2)
+        grid.addWidget(self.w_occluded,9,0,1,4); grid.addWidget(self.w_missing,10,0,1,4)
 
         query_row = QHBoxLayout(); self.w_query = QLineEdit(); self.w_query.setPlaceholderText("my_bottle")
         qb = QPushButton("Where is it?"); qb.clicked.connect(self._world_where)
@@ -165,12 +180,62 @@ class APCNV13Window(APCNV12Window):
         return tuple(x.strip().lower() for x in self.w_category.text().split(",") if x.strip())
 
     def _world_load(self):
+        self._camera_stop(silent=True)
         path,_ = QFileDialog.getOpenFileName(self,"Load observation frame","","Images (*.png *.jpg *.jpeg *.bmp *.webp)")
         if not path: return
         image = cv2.imread(path, cv2.IMREAD_COLOR)
         if image is None:
             QMessageBox.warning(self,"Image error","Could not load image."); return
         self._world_image = image; self._world_path = path; self._world_preview_refresh()
+
+    def _camera_start(self):
+        self._camera_stop(silent=True)
+        cap = cv2.VideoCapture(self._camera_index)
+        if not cap.isOpened():
+            cap.release()
+            self.w_cam_status.setText("camera: unavailable")
+            QMessageBox.warning(
+                self, "Camera unavailable",
+                "Could not open camera device 0. On a local desktop, allow camera permission. "
+                "A remote Xvfb/noVNC server usually has no physical camera unless one is forwarded."
+            )
+            return
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
+        self._camera = cap
+        self._camera_timer.start()
+        self.w_cam_status.setText("camera: LIVE • current frame is RAM-only working state")
+
+    def _camera_tick(self):
+        if self._camera is None:
+            return
+        ok, frame = self._camera.read()
+        if not ok or frame is None:
+            self._camera_timer.stop()
+            self.w_cam_status.setText("camera: read failed")
+            return
+        self._world_image = frame
+        self._world_path = f"camera:{self._camera_index}"
+        self._world_preview_refresh()
+
+    def _camera_freeze(self):
+        if self._camera is None:
+            self.w_cam_status.setText("camera: not running")
+            return
+        self._camera_timer.stop()
+        self.w_cam_status.setText("camera: FROZEN • use Teach/Observe on this frame, or Start Camera to resume")
+
+    def _camera_stop(self, *, silent: bool = False):
+        if hasattr(self, "_camera_timer"):
+            self._camera_timer.stop()
+        if self._camera is not None:
+            try:
+                self._camera.release()
+            except Exception:
+                pass
+            self._camera = None
+        if hasattr(self, "w_cam_status") and not silent:
+            self.w_cam_status.setText("camera: stopped")
 
     def _world_preview_refresh(self):
         if self._world_image is None: return
@@ -285,6 +350,14 @@ class APCNV13Window(APCNV12Window):
         self.memory_label.setText(
             f"visual {learner.episode_count} • language {self.cognitive.language.learner.episode_count} • "
             f"definitions {self.cognitive.concepts.definition_count} • persistent instances {instances} • errors {ecount}")
+
+    def closeEvent(self, event):
+        self._camera_stop(silent=True)
+        try:
+            self.cognitive.save("outputs/v0_13")
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 def run_app(seed: int = 13) -> int:
