@@ -40,12 +40,21 @@ class RichSemanticTeacherV14(RichSemanticTeacherV11):
         "would the scene support the claim that {a} is {rel} {b}?",
         "please establish whether the {a} lies {rel} the {b}?",
     )
+    # The bridge forms below expose goal VOCABULARY in constructions that are
+    # different from the held-out test constructions. This separates the two
+    # scientific questions: can APCN learn a word's semantic role, and can it
+    # reuse that role in a new construction? It is not expected to infer both an
+    # unseen word and unseen grammar from zero evidence.
     GOAL_V14_TRAIN = (
         "arrange the {a} {rel} the {b}",
         "I want the {a} {rel} the {b}",
         "make sure the {a} ends up {rel} the {b}",
         "cause the {a} to be {rel} the {b}",
         "set things so the {a} is {rel} the {b}",
+        "the desired outcome is for the {a} to be {rel} the {b}",
+        "the final arrangement should have the {a} {rel} the {b}",
+        "we want the {a} to end up {rel} the {b}",
+        "the result we want is the {a} {rel} the {b}",
     )
     GOAL_V14_TEST = (
         "have the {a} end up {rel} the {b}",
