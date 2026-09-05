@@ -1,0 +1,37 @@
+name: APCN V0.14 fast gate
+
+on:
+  push:
+    branches: [v0.14-build]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apcn_v14/**'
+      - 'tests/test_v0_14.py'
+      - 'benchmark_v0_14.py'
+      - 'benchmark_face_v0_14.py'
+      - 'run_desktop_v0_14.py'
+      - '.github/workflows/v14-fast.yml'
+
+jobs:
+  v14-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install headless dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-headless.txt
+      - name: Compile V0.14
+        run: |
+          python -m compileall -q apcn_v14
+          python -m py_compile benchmark_v0_14.py benchmark_face_v0_14.py
+      - name: V0.14 unit tests
+        run: python -m unittest tests.test_v0_14 -v
+      - name: V0.14 held-out language benchmark
+        run: python benchmark_v0_14.py
+      - name: V0.14 controlled self-face memory diagnostic
+        run: python benchmark_face_v0_14.py

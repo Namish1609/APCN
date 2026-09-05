@@ -104,12 +104,13 @@ class TestV013(unittest.TestCase):
         self.assertIn("does not implement biometric face identity", text)
 
     def test_v013_release_metadata(self):
-        version = Path("VERSION").read_text(encoding="utf-8").splitlines()[0]
-        readme = Path("README.md").read_text(encoding="utf-8")
+        # This is a V0.13 regression test, so validate V0.13's own artifacts.
+        # The repository-wide VERSION/README are intentionally allowed to advance
+        # when later APCN releases become current.
         legacy = Path("README_V0_13.md").read_text(encoding="utf-8")
         launcher = Path("run_desktop_v0_13.py").read_text(encoding="utf-8")
-        self.assertEqual(version, "0.13.0")
-        self.assertIn("APCN V0.13", readme)
+        self.assertEqual(CognitiveSessionV13.VERSION, "0.13.0")
+        self.assertIn("APCN V0.13", legacy)
         self.assertIn("Persistent World Memory", legacy)
         self.assertIn("apcn_v13.ui", launcher)
 

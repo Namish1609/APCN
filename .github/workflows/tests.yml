@@ -20,7 +20,7 @@ jobs:
           python -m pip install -r requirements-headless.txt
       - name: Compile Python sources
         run: |
-          python -m compileall -q apcn_v07 apcn_v08 apcn_v09 apcn_v10 apcn_v11 apcn_v12 apcn_v13
+          python -m compileall -q apcn_v07 apcn_v08 apcn_v09 apcn_v10 apcn_v11 apcn_v12 apcn_v13 apcn_v14
           python -m py_compile *.py
       - name: Run tests
         run: python -m unittest discover -s tests -v
@@ -30,3 +30,7 @@ jobs:
         run: python validate_v0_12.py
       - name: V0.13 persistent instance benchmark
         run: python benchmark_v0_13.py
+      - name: V0.14 held-out language benchmark
+        run: python benchmark_v0_14.py
+      - name: V0.14 controlled self-face memory diagnostic
+        run: python benchmark_face_v0_14.py
