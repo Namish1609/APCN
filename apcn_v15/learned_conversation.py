@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 import re
 
 from apcn_v10.definitions import normalize_name
@@ -11,9 +11,14 @@ from .dialogue_learning import DialogueActLearner
 class LearnedConversationEngine(ConversationEngine):
     """ConversationEngine augmented by learned dialogue-act construction cues.
 
-    Explicit teaching commands remain conservative and deterministic. Ordinary
-    questions/follow-ups can be routed by the learned sparse dialogue memory so
-    held-out surface forms do not need to be added as parser regexes.
+    V0.15 uses a two-path interpreter:
+      1. direct/high-confidence constructions already supported by the explicit
+         conversational shell retain priority;
+      2. the learned sparse dialogue memory is a FALLBACK for new paraphrases.
+
+    This prevents a weaker learned hypothesis from overriding a construction the
+    system already understands reliably, while still allowing unseen surface
+    forms to generalize without adding their wording as parser regexes.
     """
 
     VERSION = "APCN-V0.15-LEARNED-CONVERSATION-ENGINE"
@@ -50,7 +55,9 @@ class LearnedConversationEngine(ConversationEngine):
         concepts = self._mentioned_concepts(text)
         act, conf, evidence = self.dialogue_learner.predict(text, concepts)
         self.last_learned_dialogue_evidence = evidence
-        if act is None or conf < .56:
+        # Learned dialogue is intentionally conservative. A novel form must have
+        # clear cue evidence before it can trigger a semantic operation.
+        if act is None or conf < .60:
             return None
         trace = [f"dialogue:{act}:{cue}:{weight:.3f}" for cue,weight in evidence[:4]]
 
@@ -105,18 +112,34 @@ class LearnedConversationEngine(ConversationEngine):
             return ConversationReply("Hello. I am ready to continue our conversation or learn from an explicit demonstration.","GREETING",conf,trace=trace)
         return None
 
+    def _direct_construction_known(self, q: str) -> bool:
+        """True when the conservative base shell already has a direct parse."""
+        if self.GREETING.match(q) or self.THANKS.match(q) or self.HELP.match(q):
+            return True
+        if self.LAST_TAUGHT.match(q) or self.TOPIC.match(q):
+            return True
+        if any(p.match(q) for p in self.ALIAS_PATTERNS):
+            return True
+        if self.EXPLICIT_DEFINITION.match(q) or self.REMEMBER_ISA.match(q):
+            return True
+        if self._EXEC_DEFINITION_CUES.search(" "+q+" ") and not q.endswith("?"):
+            return True
+        if self.FOLLOW_DEPS.match(q) or self.FOLLOW_WHY.match(q) or self.FOLLOW_KNOW.match(q) or self.FOLLOW_MORE.match(q):
+            return True
+        for pattern in (self.COMPARE, self.DEPS, self.ABOUT, self.WHAT, self.KNOW, self.ISA_Q, self.WHERE):
+            if pattern.match(q):
+                return True
+        if re.match(r"^(?:calculate|compute|evaluate|find)\b",q,re.I):
+            return True
+        return False
+
     def respond(self, text: str) -> ConversationReply:
         q=self._clean(text)
-        # Keep explicit learning operations deterministic. They write long-term
-        # semantic memory and should not depend on a probabilistic-ish dialogue
-        # act guess.
-        if any(p.match(q) for p in self.ALIAS_PATTERNS):
-            return super().respond(q)
-        if self.EXPLICIT_DEFINITION.match(q) or self.REMEMBER_ISA.match(q):
-            return super().respond(q)
-        if self._EXEC_DEFINITION_CUES.search(" "+q+" ") and not q.endswith("?"):
-            return super().respond(q)
-        if re.match(r"^(?:calculate|compute|evaluate|find)\b",q,re.I):
+
+        # First preserve every already-reliable direct operation. Learned memory
+        # is a generalization fallback, never a replacement for stronger evidence.
+        if self._direct_construction_known(q):
+            self.last_learned_dialogue_evidence = []
             return super().respond(q)
 
         learned=self._learned_reply(q)
