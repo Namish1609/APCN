@@ -19,6 +19,7 @@ class ConversationTeacherV151(ConversationTeacherV15):
     TRAIN.update({
         "DEFINE": ConversationTeacherV15.TRAIN["DEFINE"] + (
             "define the idea {a} for me",
+            "could you define {a} for me",
             "what definition do you use for {a}",
             "describe what {a} means in your knowledge",
         ),
