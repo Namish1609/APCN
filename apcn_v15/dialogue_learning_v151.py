@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional, Sequence, Tuple
+import math
 
 from apcn_v10.language_common import tokenize
 from .dialogue_learning import ConversationTeacherV15, DialogueActLearner
@@ -71,7 +72,12 @@ class ConversationTeacherV151(ConversationTeacherV15):
 
 
 class DialogueActLearnerV151(DialogueActLearner):
-    """Dialogue learner that excludes low-information function-word cues."""
+    """Dialogue learner with content filtering and learned anchor cues.
+
+    A high-purity learned content word/short phrase can act as an anchor before
+    weaker overlapping phrase evidence is aggregated. The anchor is discovered
+    from cue statistics; there is no hand-written word -> dialogue-act map.
+    """
 
     STOP = {
         "a","an","the","is","are","was","were","be","been","being",
@@ -102,3 +108,50 @@ class DialogueActLearnerV151(DialogueActLearner):
                 if i+n == len(toks):
                     rows.add("E:" + phrase)
         return sorted(rows)
+
+    def _best_anchor(self, text: str) -> Optional[Tuple[str, float, str]]:
+        """Return a learned high-purity content anchor if one exists."""
+        candidates = []
+        total_all = max(1, sum(self.act_totals.values()))
+        for cue in self._cues(text):
+            row = self.cue_act.get(cue)
+            if not row:
+                continue
+            support = sum(row.values())
+            if support < 3:
+                continue
+            act, count = row.most_common(1)[0]
+            purity = count / support
+            baseline = self.act_totals.get(act, 0) / total_all
+            discrimination = purity - baseline
+            phrase = cue[2:]
+            content_tokens = [
+                t for t in phrase.split()
+                if t not in self.STOP and not t.startswith("conceptslot")
+            ]
+            # The anchor should be semantically concentrated, not a long surface
+            # sentence that merely happened to be memorized.
+            if not (1 <= len(content_tokens) <= 2):
+                continue
+            if purity < .86 or discrimination < .45:
+                continue
+            reliability = purity * (1.0 - math.exp(-support / 3.0))
+            # Prefer high purity/support and shorter semantic anchors.
+            rank = reliability * (1.05 if len(content_tokens) == 1 else 1.0)
+            candidates.append((rank, support, act, reliability, cue))
+        if not candidates:
+            return None
+        candidates.sort(reverse=True)
+        _, _, act, reliability, cue = candidates[0]
+        return act, float(reliability), cue
+
+    def predict(self, utterance: str, concepts: Sequence[str] = ()):
+        text = self._replace_concepts(utterance, concepts)
+        anchor = self._best_anchor(text)
+        if anchor is not None:
+            act, reliability, cue = anchor
+            # Keep confidence calibrated below 1.0 because even a pure lexical
+            # anchor can be polysemous outside the observed training context.
+            confidence = min(.94, .58 + .40 * reliability)
+            return act, float(confidence), [(cue, float(reliability))]
+        return super().predict(utterance, concepts)
