@@ -50,7 +50,8 @@ class APCNV15Window(APCNV14LaunchWindow):
         self.p_hint.setText(
             "V0.15 is 100% language-focused. Existing perception/world memory remains available as grounding, "
             "but automatic V0.15 training adds zero visual experiences. The new Conversation tab talks over explicit "
-            "APCN knowledge, learns aliases/definitions/facts, maintains semantic dialogue context and asks for clarification when language is unknown."
+            "APCN knowledge, learns aliases/definitions/facts, learns dialogue constructions, maintains semantic dialogue context "
+            "and asks for clarification when language is unknown."
         )
         self.p_current.setText(f"V0.15: {note}")
         self.tabs.addTab(self._build_conversation_tab(), "Conversation")
@@ -63,8 +64,8 @@ class APCNV15Window(APCNV14LaunchWindow):
         title.setFont(QFont("Sans Serif", 14, 800)); outer.addWidget(title)
         hint = QLabel(
             "Talk normally within APCN's current knowledge. Follow-ups such as 'what does it depend on?', 'why?', and 'tell me more' use semantic dialogue state. "
-            "Teach vocabulary with 'fluxion means acceleration', definitions with 'speed is distance divided by time', and simple facts with 'remember that orbix is a sensor'. "
-            "Unknown constructions are surfaced as unknown instead of guessed."
+            "V0.15 also learns sparse dialogue-act constructions so unseen paraphrases can map to definition/dependency/knowledge/comparison/follow-up operations without adding those test phrases as regexes. "
+            "Teach vocabulary with 'fluxion means acceleration', definitions with 'speed is distance divided by time', and simple facts with 'remember that orbix is a sensor'."
         )
         hint.setWordWrap(True); outer.addWidget(hint)
 
@@ -98,14 +99,14 @@ class APCNV15Window(APCNV14LaunchWindow):
             "what is acceleration?\n"
             "what does it depend on?\n"
             "why?\n"
+            "could you give me a definition for acceleration?\n"
+            "which ideas feed into acceleration?\n"
             "fluxion means acceleration\n"
             "what is fluxion?\n"
             "speed is distance divided by time\n"
-            "what is speed?\n"
             "remember that orbix is a sensor\n"
-            "what is orbix?\n"
             "what did I just teach you?\n"
-            "compare speed and acceleration"
+            "contrast speed with acceleration"
         )
         eg.addWidget(ex)
 
@@ -132,7 +133,9 @@ class APCNV15Window(APCNV14LaunchWindow):
         try:
             row = self.cognitive.language_only_train(self.c_steps.value())
             self.c_train_status.setText(
-                f"language +{row['experiences_added']} • visual +{row['visual_experiences_added']} • correct-before-learning {row['correct_before_learning_rate']:.1%}"
+                f"language +{row['experiences_added']} • dialogue {row['dialogue_steps']} • grounded {row['grounded_semantic_steps']} • "
+                f"visual +{row['visual_experiences_added']} • dialogue pre-learn {row['dialogue_correct_before_learning']:.1%} • "
+                f"grounded pre-learn {row['grounded_correct_before_learning']:.1%}"
             )
             self._save_v15(silent=True); self._refresh_v15(last=row)
         except Exception as exc:
@@ -141,9 +144,13 @@ class APCNV15Window(APCNV14LaunchWindow):
     def _v15_test(self):
         try:
             samples = max(100, min(1000, self.c_steps.value()))
-            row = self.cognitive.test_rich_language(samples)
+            grounded = self.cognitive.test_rich_language(samples)
+            dialogue = self.cognitive.test_dialogue_generalization(samples)
+            row = {"grounded_semantic": grounded, "dialogue_generalization": dialogue}
             self.c_train_status.setText(
-                f"HELD-OUT • exact {row['exact']:.1%} • intent {row['intent']:.1%} • relation {row['relation']:.1%} • operator {row['operator']:.1%} • frozen={row['memory_frozen']}"
+                f"HELD-OUT • dialogue act {dialogue['accuracy']:.1%} • grounded exact {grounded['exact']:.1%} • "
+                f"intent {grounded['intent']:.1%} • relation {grounded['relation']:.1%} • operator {grounded['operator']:.1%} • "
+                f"frozen={grounded['memory_frozen'] and dialogue['memory_frozen']}"
             )
             self._save_v15(silent=True); self._refresh_v15(last=row)
         except Exception as exc:
