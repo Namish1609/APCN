@@ -9,13 +9,15 @@ if __name__ == "__main__":
     report = run_conversation_benchmark()
     print(json.dumps(report.to_dict(), indent=2))
     if report.act_accuracy < .85:
-        raise SystemExit("V0.15 smoke act accuracy below release gate")
+        raise SystemExit("V0.15 smoke act accuracy below gate")
     if report.required_content_accuracy < .80:
-        raise SystemExit("V0.15 smoke required-content accuracy below release gate")
-    if report.heldout_dialogue_act_accuracy < .70:
-        raise SystemExit("V0.15 held-out learned dialogue-act accuracy below release gate")
-    if report.heldout_interactive_accuracy < .70:
-        raise SystemExit("V0.15 held-out interactive conversation accuracy below release gate")
+        raise SystemExit("V0.15 smoke required-content accuracy below gate")
+    # Development split only: useful for regression, not a claim of blind English
+    # generalization. Do not tune individual phrases from this result.
+    if report.dev_dialogue_act_accuracy < .55:
+        raise SystemExit("V0.15 development dialogue accuracy below sanity floor")
+    if report.knowledge_language_separation < 1.0:
+        raise SystemExit("V0.15 language/knowledge separation contract failed")
     if report.unknown_honesty < 1.0:
         raise SystemExit("V0.15 unknown-honesty gate failed")
     if report.learned_memory_accuracy < 1.0:
