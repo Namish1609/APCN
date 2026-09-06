@@ -6,9 +6,8 @@ import json
 
 from apcn_v14.session import CognitiveSessionV14
 from .conversation import ConversationReply
-from .corpus import EnglishExposureMemory
-from .dialogue_learning import test_dialogue_learner, train_dialogue_learner
-from .dialogue_learning_v151 import ConversationTeacherV151, DialogueActLearnerV151
+from .dialogue_learning import ConversationTeacherV15, test_dialogue_learner, train_dialogue_learner
+from .dialogue_learning_v151 import DialogueActLearnerV151, balanced_bootstrap_dialogue
 from .learned_conversation import LearnedConversationEngine
 from .lexicon import FactMemory, LexicalSemanticMemory
 
@@ -19,19 +18,19 @@ class CognitiveSessionV15(CognitiveSessionV14):
     def __init__(self, seed: int = 15):
         super().__init__(seed)
         self.seed = seed
-        # V0.15 is intentionally a language-only research release. Existing
-        # perception/world memory is preserved as grounding, but automatic
-        # development budget no longer adds visual training experiences.
+        # Course-corrected V0.15: language is a semantic compiler around the
+        # existing concept/world substrate. No corpus/n-gram exposure subsystem
+        # is active, and no V0.15 training adds visual experiences.
         self.language_budget_ratio = 1.0
         self.lexicon_v15 = LexicalSemanticMemory()
         self.facts_v15 = FactMemory()
-        self.english_exposure_v15 = EnglishExposureMemory()
         self.dialogue_learner_v15 = DialogueActLearnerV151()
-        self.dialogue_teacher_v15 = ConversationTeacherV151(seed + 15000)
-        # Small deterministic bootstrap makes the Conversation tab usable on a
-        # fresh install. Subsequent Language Only training continues improving
-        # this learned dialogue memory rather than expanding parser regexes.
-        train_dialogue_learner(self.dialogue_learner_v15, self.dialogue_teacher_v15, 480)
+        self.dialogue_teacher_v15 = ConversationTeacherV15(seed + 15000)
+        self.dialogue_bootstrap_v15 = balanced_bootstrap_dialogue(
+            self.dialogue_learner_v15,
+            self.dialogue_teacher_v15,
+            repeats_per_template=4,
+        )
         self.v15_language_history = []
         self.conversation = self._make_conversation()
 
@@ -48,8 +47,6 @@ class CognitiveSessionV15(CognitiveSessionV14):
 
     @staticmethod
     def _adopt_v14_state(obj: "CognitiveSessionV15", old: CognitiveSessionV14) -> None:
-        # Preserve all previously learned cognition. V0.15 changes only the active
-        # research priority and adds conversational memories.
         for name in (
             "visual", "concepts", "definitions", "query", "graph", "errors",
             "consolidation", "world", "visual_test_history", "language_test_history",
@@ -71,7 +68,7 @@ class CognitiveSessionV15(CognitiveSessionV14):
 
     def talk(self, text: str) -> ConversationReply:
         reply = self.conversation.respond(text)
-        # Persist only a semantic training/audit history, never a raw chat log.
+        # Persist semantic audit only, never a raw conversation transcript.
         self.v15_language_history.append({
             "kind": "conversation",
             "act": reply.act,
@@ -84,17 +81,20 @@ class CognitiveSessionV15(CognitiveSessionV14):
         return reply
 
     def language_only_train(self, steps: int = 1000) -> Dict[str, object]:
-        """Spend the entire V0.15 learning budget on language.
+        """Train language compilation only; preserve the world/perception state.
 
-        Roughly 55% of experiences teach general conversational dialogue acts;
-        the rest continue V0.14 grounded semantic construction learning. Neither
-        path changes visual training state.
+        Dialogue routing is deliberately the smaller share. Most V0.15 training
+        continues semantic-program composition in the grounded language learner.
         """
         steps = max(2, int(steps))
-        dialogue_steps = max(1, int(round(steps * .55)))
+        dialogue_steps = max(1, int(round(steps * .35)))
         semantic_steps = max(1, steps - dialogue_steps)
         visual_before = self.visual.learner.episode_count
-        drow = train_dialogue_learner(self.dialogue_learner_v15, self.dialogue_teacher_v15, dialogue_steps)
+        drow = train_dialogue_learner(
+            self.dialogue_learner_v15,
+            self.dialogue_teacher_v15,
+            dialogue_steps,
+        )
         srow = self.language_first_train(semantic_steps)
         visual_after = self.visual.learner.episode_count
         result = {
@@ -120,39 +120,29 @@ class CognitiveSessionV15(CognitiveSessionV14):
         return result
 
     def test_dialogue_generalization(self, samples: int = 240) -> Dict[str, object]:
-        teacher = ConversationTeacherV151(self.seed + 15111)
-        return test_dialogue_learner(self.dialogue_learner_v15, teacher, samples)
-
-    def ingest_english_text(self, text: str) -> Dict[str, object]:
-        """Expose APCN to English surface statistics without asserting semantics."""
-        row = self.english_exposure_v15.ingest(text)
-        self.v15_language_history.append({"kind": "english_exposure", **row})
-        if len(self.v15_language_history) > 4096:
-            del self.v15_language_history[: len(self.v15_language_history) - 4096]
-        return {
-            **row,
-            "semantic_learning": False,
-            "raw_text_retained": False,
-            "note": "surface familiarity only; semantic meaning still requires grounding/definition/demonstration",
-        }
-
-    def english_coverage(self, text: str) -> Dict[str, object]:
-        semantic_terms = set(self.concepts.records)
-        semantic_terms.update(self.lexicon_v15.aliases)
-        semantic_terms.update(self.lexicon_v15.aliases[k].target for k in self.lexicon_v15.aliases)
-        semantic_terms.update(r.subject for r in self.facts_v15.facts.values())
-        semantic_terms.update(r.object for r in self.facts_v15.facts.values())
-        return self.english_exposure_v15.coverage(text, semantic_terms)
+        # This teacher TEST split is now a development benchmark, not a blind
+        # final benchmark: we have already inspected some failures from it.
+        teacher = ConversationTeacherV15(self.seed + 15111)
+        row = test_dialogue_learner(self.dialogue_learner_v15, teacher, samples)
+        row["benchmark_role"] = "development_not_blind"
+        return row
 
     def conversation_memory_audit(self) -> Dict[str, object]:
         return {
             "lexicon": self.lexicon_v15.summary(16),
             "facts": self.facts_v15.summary(16),
-            "english_exposure": self.english_exposure_v15.summary(16),
-            "dialogue_constructions": self.dialogue_learner_v15.summary(16),
+            "dialogue_router": self.dialogue_learner_v15.summary(16),
+            "dialogue_bootstrap": self.dialogue_bootstrap_v15,
             "conversation": self.conversation.summary(),
             "raw_chat_transcript_persisted": False,
+            "raw_corpus_memory_enabled": False,
             "language_budget_ratio": 1.0,
+            "architecture_contract": {
+                "language_is_semantic_compiler": True,
+                "concept_world_memory_is_knowledge_substrate": True,
+                "dialogue_statistics_are_not_world_knowledge": True,
+                "v015_visual_training_budget": 0.0,
+            },
         }
 
     def memory_audit(self) -> Dict[str, object]:
@@ -167,12 +157,10 @@ class CognitiveSessionV15(CognitiveSessionV14):
         super().save(base)
         lex = out / "lexicon_v0_15.json"
         facts = out / "facts_v0_15.json"
-        exposure = out / "english_exposure_v0_15.json"
         dialogue = out / "dialogue_memory_v0_15.json"
         state = out / "session_v0_15.json"
         self.lexicon_v15.save(lex)
         self.facts_v15.save(facts)
-        self.english_exposure_v15.save(exposure)
         self.dialogue_learner_v15.save(dialogue)
         state.write_text(json.dumps({
             "version": self.VERSION,
@@ -185,7 +173,6 @@ class CognitiveSessionV15(CognitiveSessionV14):
             "base_v14": str(base),
             "lexicon": str(lex),
             "facts": str(facts),
-            "english_exposure": str(exposure),
             "dialogue": str(dialogue),
             "session": str(state),
         }
@@ -201,21 +188,23 @@ class CognitiveSessionV15(CognitiveSessionV14):
         cls._adopt_v14_state(obj, old)
         lex = out / "lexicon_v0_15.json"
         facts = out / "facts_v0_15.json"
-        exposure = out / "english_exposure_v0_15.json"
         dialogue = out / "dialogue_memory_v0_15.json"
         if lex.exists():
             obj.lexicon_v15 = LexicalSemanticMemory.load(lex)
         if facts.exists():
             obj.facts_v15 = FactMemory.load(facts)
-        if exposure.exists():
-            obj.english_exposure_v15 = EnglishExposureMemory.load(exposure)
         if dialogue.exists():
             obj.dialogue_learner_v15 = DialogueActLearnerV151.load(dialogue)
         state = out / "session_v0_15.json"
         if state.exists():
             data = json.loads(state.read_text(encoding="utf-8"))
             obj.v15_language_history = list(data.get("v15_language_history", []))[-4096:]
-        obj.dialogue_teacher_v15 = ConversationTeacherV151(seed + 15000)
+        obj.dialogue_teacher_v15 = ConversationTeacherV15(seed + 15000)
+        obj.dialogue_bootstrap_v15 = {
+            "loaded_checkpoint": True,
+            "held_out_examples_used": 0,
+            "observations": obj.dialogue_learner_v15.observations,
+        }
         obj.language_budget_ratio = 1.0
         obj.conversation = obj._make_conversation()
         return obj
