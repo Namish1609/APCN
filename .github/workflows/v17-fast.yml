@@ -1,0 +1,37 @@
+name: APCN V0.17 fast gate
+
+on:
+  push:
+    branches: [v0.17-build]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apcn_v17/**'
+      - 'tests/test_v0_17.py'
+      - 'benchmark_v0_17.py'
+      - 'run_desktop_v0_17.py'
+      - 'VERSION'
+      - 'README.md'
+      - 'V0_17_STRUCTURED_DISCOURSE.md'
+      - '.github/workflows/v17-fast.yml'
+
+jobs:
+  v17-fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install headless dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-headless.txt
+      - name: Compile V0.17
+        run: |
+          python -m compileall -q apcn_v17
+          python -m py_compile benchmark_v0_17.py run_desktop_v0_17.py
+      - name: V0.17 unit tests
+        run: python -m unittest tests.test_v0_17 -v
+      - name: V0.17 structured semantics benchmark
+        run: python benchmark_v0_17.py
