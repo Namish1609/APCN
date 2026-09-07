@@ -11,8 +11,8 @@ from .bidirectional import (
     BidirectionalConstructionMemory,
     BidirectionalTeacherV16,
     SemanticResponderV16,
-    BidirectionalLanguageEngineV16,
 )
+from .compositional import BidirectionalLanguageEngineV161
 
 
 class CognitiveSessionV16(CognitiveSessionV15):
@@ -29,7 +29,7 @@ class CognitiveSessionV16(CognitiveSessionV15):
 
     def _rebuild_v16_language(self) -> None:
         self.semantic_responder_v16 = SemanticResponderV16(self.concepts, self.lexicon_v15, self.facts_v15)
-        self.language_v16 = BidirectionalLanguageEngineV16(
+        self.language_v16 = BidirectionalLanguageEngineV161(
             self.bidirectional_v16,
             self.semantic_responder_v16,
             fallback_engine=self.conversation,
@@ -98,6 +98,7 @@ class CognitiveSessionV16(CognitiveSessionV15):
             "engine": self.language_v16.summary(),
             "architecture_contract": {
                 "same_construction_memory_used_for_parse_and_generate": True,
+                "compositional_request_parser_derived_from_train_constructions": True,
                 "concept_world_memory_is_authoritative": True,
                 "semantic_responder_is_truth_firewall": True,
                 "surface_generator_has_world_memory_reference": False,
