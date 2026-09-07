@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from apcn_v16.bidirectional import SemanticFrame, BidirectionalConstructionMemory
+from apcn_v16.bidirectional import SemanticFrame
+from apcn_v16.compositional import RECOMBINATION_SPLIT
 from apcn_v16.benchmark import run_bidirectional_benchmark
 from apcn_v16.session import CognitiveSessionV16
 
@@ -18,12 +19,16 @@ class TestV016(unittest.TestCase):
         s._rebuild_v16_language()
         return s
 
-    def test_bootstrap_uses_no_dev_examples(self):
+    def test_bootstrap_uses_no_dev_or_recombination_examples(self):
         s = self._session()
         self.assertEqual(s.bidirectional_bootstrap_v16["dev_templates_used"], 0)
+        retained = {rec.template for rec in s.bidirectional_v16.records.values()}
         for templates in s.bidirectional_teacher_v16.DEV.values():
             for template in templates:
-                self.assertFalse(any(rec.template == template for rec in s.bidirectional_v16.records.values()))
+                self.assertNotIn(template, retained)
+        for templates in RECOMBINATION_SPLIT.values():
+            for template in templates:
+                self.assertNotIn(template, retained)
 
     def test_same_construction_memory_parses_and_generates(self):
         s = self._session()
@@ -35,6 +40,20 @@ class TestV016(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 5)
         rep = s.bidirectional_v16.roundtrip(frame, 20)
         self.assertEqual(rep["roundtrip_exact"], 1.0)
+
+    def test_compositional_parser_recombines_train_cues_in_new_syntax(self):
+        s = self._session()
+        examples = [
+            ("explain what acceleration means", SemanticFrame.make("ASK_DEFINITION", concept="acceleration")),
+            ("tell me which concepts speed depends on", SemanticFrame.make("ASK_DEPENDENCIES", concept="speed")),
+            ("is density familiar to you", SemanticFrame.make("ASK_KNOWLEDGE", concept="density")),
+            ("explain the difference between speed and density", SemanticFrame.make("COMPARE", left="speed", right="density")),
+        ]
+        for text, expected in examples:
+            parsed, conf, evidence = s.language_v16.parse(text)
+            self.assertEqual(parsed, expected, text)
+            self.assertGreater(conf, .5)
+            self.assertTrue(any(row.get("mode") == "compositional_cue" for row in evidence))
 
     def test_conversation_uses_semantic_reasoner_then_realizer(self):
         s = self._session()
@@ -114,6 +133,7 @@ class TestV016(unittest.TestCase):
         self.assertEqual(rep.explicit_learning_transfer, 1.0)
         self.assertEqual(rep.content_firewall, 1.0)
         self.assertEqual(rep.visual_experiences_changed, 0)
+        self.assertGreaterEqual(rep.recombination_accuracy, .75)
         self.assertEqual(rep.benchmark_role, "development_and_architecture_contract_not_blind_final")
 
     def test_v16_ui_and_launcher_exist(self):
