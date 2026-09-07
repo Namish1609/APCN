@@ -53,6 +53,10 @@ class CompositionalRequestParserV16:
     cue->operation evidence from the existing construction memory and resolves
     semantic slots from explicit known concept/alias names. There is no hand-
     written word->intent dictionary.
+
+    A deliberately small morphology normalizer collapses common English surface
+    inflections before cue comparison. It does not assign semantics: the same
+    normalization is applied to both learned TRAIN cues and new input tokens.
     """
 
     STOP = {
@@ -69,9 +73,32 @@ class CompositionalRequestParserV16:
         self.memory = memory
 
     @staticmethod
-    def _literal_tokens(template: str) -> List[str]:
+    def _morph(token: str) -> str:
+        """Conservative inflection normalization with no semantic mapping.
+
+        This is intentionally much smaller than a dictionary lemmatizer. It only
+        removes productive suffixes needed to compare a learned lexical cue with
+        ordinary inflected use: concepts/concept, depends/depend,
+        dependencies/dependency, learned/learn, etc. Irregular forms remain
+        unknown unless independently learned.
+        """
+        t = str(token).lower().strip()
+        if len(t) > 4 and t.endswith("ies"):
+            return t[:-3] + "y"
+        if len(t) > 4 and t.endswith("ed"):
+            base = t[:-2]
+            # studied -> study; learned -> learn. Do not invent irregular roots.
+            if base.endswith("i"):
+                base = base[:-1] + "y"
+            return base
+        if len(t) > 3 and t.endswith("s") and not t.endswith(("ss", "us", "is")):
+            return t[:-1]
+        return t
+
+    @classmethod
+    def _literal_tokens(cls, template: str) -> List[str]:
         literal = _SLOT.sub(" ", template)
-        return [t.lower() for t in _SURFACE_TOKEN.findall(literal)]
+        return [cls._morph(t) for t in _SURFACE_TOKEN.findall(literal)]
 
     def _cue_table(self):
         cue_op: DefaultDict[str, Counter] = defaultdict(Counter)
@@ -108,8 +135,14 @@ class CompositionalRequestParserV16:
         total_all = max(1, sum(op_totals.values()))
         scores: Dict[str, float] = defaultdict(float)
         evidence: DefaultDict[str, List[Tuple[float, str]]] = defaultdict(list)
-        tokens = [t for t in _SURFACE_TOKEN.findall(_norm_surface(text)) if t not in self.STOP]
+        tokens = [
+            self._morph(t)
+            for t in _SURFACE_TOKEN.findall(_norm_surface(text))
+            if t not in self.STOP
+        ]
         for token in tokens:
+            if token in self.STOP:
+                continue
             row = cues.get(token)
             if not row:
                 continue
