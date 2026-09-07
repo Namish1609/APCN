@@ -1,161 +1,76 @@
-# APCN V0.17 — Structured Discourse Semantics
+# APCN V0.18 — Natural Semantic Conversation
 
-Current release candidate: **0.17.0**.
+Current release: **0.18.0**.
 
-APCN is an experimental non-neural cognitive architecture built around persistent concepts, explicit world memory, semantic programs, bounded online learning, and inspectable reasoning. V0.17 continues the V0.15/V0.16 course correction: language is a **compiler and realizer around explicit cognition**, not a replacement for concept/world memory.
+APCN is an experimental non-neural cognitive architecture built around persistent concepts, explicit world/semantic memory, bounded online learning, inspectable reasoning, and a language layer that compiles to and realizes explicit meaning.
 
-## V0.17 architecture
+V0.18 fixes the conversation-integration failures exposed by real V0.17 desktop use and begins the planned natural-generation phase.
 
 ```text
 English
-   ↓
-V0.16 bidirectional constructions
-   ↓
-V0.17 structured semantic compiler
-   ↓
-┌──────────────────────────────────────┐
-│ explicit semantic structure          │
-│                                      │
-│ NOT(...)                             │
-│ CAUSE(cause, effect)                 │
-│ IF(condition, consequence)           │
-│ BEFORE(first, second)                │
-│ AFTER(first, second)                 │
-│ AND(left, right)                     │
-│ FORALL_ISA(kind, category)           │
-│ EXISTS_PROPERTY(kind, property)      │
-│ atomic entity/property/event facts   │
-└──────────────────────────────────────┘
-   ↓
-concept/world memory + explicit semantic memory
-   ↓
-transparent reasoning
-   ↓
-semantic answer
-   ↓
-the same operator construction memory
-   ↓
+  ↓
+semantic compiler
+  ↓
+SemanticClause
+  ↓
+concept/world + structured semantic memory
+  ↓
+transparent reasoning / proof
+  ↓
+AnswerPlanV18
+  ║
+  ║ truth firewall
+  ▼
+bounded natural realizer
+  ↓
 English
 ```
 
-The truth firewall remains mandatory. The V0.17 surface generator receives an explicit `SemanticClause` and has **no reference to semantic truth memory, the world model, perception memory, or the concept store**. It can choose how to express a proposition but cannot manufacture factual content.
+The surface realizer does **not** receive the truth memory, concept store, world state, or perception memory. It can choose how to say an authorized answer; it cannot decide what is true.
 
-V0.17 remains non-neural: no transformer, external LLM, gradient descent, backpropagation, or trainable neural language model is used.
+## What V0.18 fixes
 
-## Why V0.17 exists
+- ordinary `is Milo active?` now queries structured `PROPERTY` memory;
+- ordinary `is Milo a cat?` now queries structured `IS_A` memory;
+- `is Milo a creature?` can use universal category inference;
+- `why?` follows the proof for the immediately previous answer;
+- `what do you know about Milo?` aggregates structured entity facts;
+- standard `<cause> causes <effect>` is parsed compositionally;
+- `PROPERTY` is no longer mirrored into the legacy `is_a` fact store;
+- unknown near-miss vocabulary can trigger a suggestion without auto-learning;
+- inherited concept/query/language bindings are reconciled to one canonical `ConceptStore`;
+- V0.18 adds bounded semantic answer-plan → English realization constructions.
 
-V0.16 proved a controlled `English ↔ SemanticFrame` path for flat requests and answers. V0.17 expands the **meaning representation itself** instead of increasing sentence-template count.
-
-The release adds:
-
-- recursive `SemanticClause` structures;
-- explicit negation;
-- explicit causal relations;
-- explicit conditionals;
-- temporal `BEFORE` / `AFTER` structure;
-- conjunction;
-- universal category rules;
-- existential property statements;
-- tense on atomic events/properties;
-- bounded semantic discourse focus for references such as `it`;
-- bounded structured semantic memory;
-- transparent universal-rule, conditional, causal and temporal lookup;
-- bidirectional learned operator constructions;
-- semantic roundtrip testing for nested structures;
-- V0.16 checkpoint migration;
-- a **Structured Semantics** desktop lab;
-- a dedicated V0.17 CI/research gate.
-
-## Example conversation
+Example:
 
 ```text
-YOU:  remember that milo is a cat
+YOU: remember that milo is a cat
 APCN: Stored as explicit semantic memory: Milo is a cat.
 
-YOU:  remember that it is active
+YOU: remember that milo is active
 APCN: Stored as explicit semantic memory: Milo is active.
 
-YOU:  is it true that it is active?
+YOU: is milo active?
 APCN: Yes. Milo is active.
+
+YOU: remember that every cat is a creature
+APCN: Stored as explicit semantic memory: Every cat is a creature.
+
+YOU: is milo a creature?
+APCN: Yes. Milo is a creature. I can derive that because Milo is a cat, and every cat is a creature.
+
+YOU: why?
+APCN: Because Milo is a cat, and every cat is a creature.
 ```
 
-The raw transcript is not retained as long-term memory. V0.17 keeps bounded semantic discourse state such as the current focus entity and recent semantic proposition.
-
-A universal-rule example:
+Unknown remains explicit:
 
 ```text
-YOU:  remember that every cat is a creature
-YOU:  remember that milo is a cat
-YOU:  is it true that milo is a creature?
-APCN: Yes. Milo is a creature.
+YOU: is zorbin a creature?
+APCN: I don't know whether Zorbin is a creature yet. I have no explicit fact or rule that establishes it.
 ```
 
-The answer is derived from explicit records rather than from language co-occurrence.
-
-A conditional example:
-
-```text
-YOU:  remember that if battery is empty then device stops
-YOU:  what follows if battery is empty?
-APCN: ... Device stops.
-```
-
-A causal example:
-
-```text
-YOU:  remember that lamp turns off because power fails
-YOU:  what causes lamp turns off?
-APCN: ... Power fails.
-```
-
-A temporal example:
-
-```text
-YOU:  remember that door opens before light turns on
-YOU:  what happens before light turns on?
-APCN: ... Door opens.
-```
-
-Negation remains explicit rather than closed-world guesswork:
-
-```text
-YOU:  remember that not sensor is active
-YOU:  is it true that sensor is active?
-APCN: No. My explicit memory supports the negation ...
-```
-
-If neither a proposition nor its negation is known, APCN reports **unknown** instead of assuming false.
-
-## Language generation contract
-
-Higher-order operators are learned as reusable bidirectional constructions. For example, the same semantic structure:
-
-```text
-CAUSE(
-  EVENT(power, fail),
-  EVENT(lamp, turn_off)
-)
-```
-
-can be parsed from or realized through several learned causal surfaces. Nested structures are generated recursively and then parsed back for semantic roundtrip evaluation.
-
-This release does **not** claim that these controlled constructions equal open-domain English fluency. The objective is semantic compositionality and inspectable truth separation.
-
-## Persistence
-
-V0.17 saves to `outputs/v0_17/`:
-
-```text
-base_v16/
-operator_constructions_v0_17.json
-semantic_memory_v0_17.json
-semantic_discourse_v0_17.json
-session_v0_17.json
-```
-
-Raw chat sentences are not stored in the V0.17 semantic/discourse memories. Structured records, evidence counts, and bounded discourse entities are persisted.
-
-## Desktop usage
+## Desktop
 
 Windows PowerShell:
 
@@ -164,7 +79,7 @@ cd "D:\HUD Jarvis\APCN"
 git checkout main
 git pull
 .\.venv\Scripts\Activate.ps1
-python run_desktop_v0_17.py
+python run_desktop_v0_18.py
 ```
 
 Linux/X11:
@@ -176,66 +91,27 @@ git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_17.py
+python run_desktop_v0_18.py
 ```
 
-The inherited **Conversation** and **Bidirectional Language** tabs remain available. V0.17 adds **Structured Semantics**, where you can:
-
-- parse a sentence into nested semantic structure;
-- inspect parser evidence;
-- store an explicit semantic proposition/rule;
-- generate language from explicit nested semantics;
-- run semantic roundtrip checks;
-- inspect semantic memory and discourse state.
+Use **Conversation** as the main interface. **Conversation Quality** shows the V0.18 architecture audit and the real desktop regression sequence.
 
 ## Testing
 
-Fast V0.17 gate:
-
 ```bash
-python -m unittest tests.test_v0_17 -v
-python benchmark_v0_17.py
-```
-
-Full project regression:
-
-```bash
+python -m unittest tests.test_v0_18 -v
+python benchmark_v0_18.py
 python -m unittest discover -s tests -v
 ```
 
-The V0.17 controlled architecture gate measures:
+The V0.18 benchmark is a **desktop transcript regression and architecture gate, not a blind general-English benchmark**.
 
-- structured operator parsing;
-- nested semantic roundtrip preservation;
-- generation diversity for higher-order operators;
-- discourse reference resolution;
-- universal category inference;
-- conditional consequence lookup;
-- causal retrieval;
-- temporal-order retrieval;
-- explicit negation;
-- unknown honesty;
-- truth/generation separation;
-- zero visual-training changes.
+## Scientific boundary
 
-These are controlled architecture/composition tests, **not** a blind proof of general English competence or LLM-level fluency.
+V0.18 does not claim LLM-level fluency, broad commonsense, programming ability, or superiority to modern neural language models. It tests a narrower question:
 
-## Scientific boundaries
+> Can ordinary conversational English be routed into explicit semantic memory and transparent reasoning, then expressed naturally enough through a bounded truth-isolated realization system?
 
-V0.17 does **not** claim:
+No external LLM, transformer, gradient descent, backpropagation, or neural language model is used in the V0.18 language path.
 
-- unrestricted English grammar;
-- LLM-level sentence generation;
-- broad commonsense reasoning;
-- automatic acquisition of unknown word meanings from nothing;
-- general programming ability;
-- general intelligence;
-- superiority to modern neural language models.
-
-The research question is narrower:
-
-> Can APCN progressively expand an explicit, grounded cognitive system from flat language frames into nested discourse semantics and transparent rule reasoning, while keeping factual knowledge outside the language generator?
-
-That separation remains non-negotiable. If future product-quality fluency requires a compact neural surface realizer, it must be evaluated as a separate hybrid product track rather than silently changing the claims of the pure APCN research architecture.
-
-See `V0_15_COURSE_CORRECTION.md`, `V0_16_BIDIRECTIONAL_LANGUAGE.md`, and `V0_17_STRUCTURED_DISCOURSE.md` for the successive language architecture contracts.
+See `V0_15_COURSE_CORRECTION.md`, `V0_16_BIDIRECTIONAL_LANGUAGE.md`, `V0_17_STRUCTURED_DISCOURSE.md`, and `V0_18_NATURAL_CONVERSATION.md`.
