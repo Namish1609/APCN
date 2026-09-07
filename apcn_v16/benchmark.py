@@ -4,6 +4,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, List
 
 from .bidirectional import SemanticFrame
+from .compositional import RECOMBINATION_SPLIT
 from .session import CognitiveSessionV16
 
 
@@ -17,6 +18,7 @@ class BidirectionalBenchmarkReport:
     explicit_learning_transfer: float
     content_firewall: float
     visual_experiences_changed: int
+    recombination_accuracy: float
     dev_parse_accuracy: float
     benchmark_role: str
     failures: List[Dict[str, object]]
@@ -83,10 +85,24 @@ def run_bidirectional_benchmark(seed: int = 16001) -> BidirectionalBenchmarkRepo
     forbidden = {"acceleration", "speed", "density", "force", "pressure", "momentum"}
     firewall_ok = int(bool(generated) and all(not any(term in text.lower() for term in forbidden) for text in generated))
 
-    # Diagnostic only. DEV has not been learned, but once this report is viewed it
-    # must not be called a blind final test.
-    dev_total = dev_ok = 0
+    # Frozen before its first execution. This split recombines lexical cues that
+    # occur in TRAIN but puts them in new syntax. It is not expanded after seeing
+    # failures; once this report is inspected it becomes development evidence.
+    recombine_total = recombine_ok = 0
     teacher = s.bidirectional_teacher_v16
+    for op, templates in RECOMBINATION_SPLIT.items():
+        frame = teacher.frame_for(op)
+        values = frame.slot_dict()
+        for template in templates:
+            text = template.format(**values)
+            parsed, _, _ = s.language_v16.parse(text)
+            recombine_total += 1; recombine_ok += int(parsed == frame)
+            if parsed != frame and len(failures) < 30:
+                failures.append({"suite":"recombination","text":text,"expected":frame.to_dict(),"parsed":None if parsed is None else parsed.to_dict()})
+
+    # Original DEV intentionally contains genuinely unseen lexical material. It
+    # remains diagnostic; zero-shot meaning for unknown words is not assumed.
+    dev_total = dev_ok = 0
     for op, templates in teacher.DEV.items():
         frame = teacher.frame_for(op)
         values = frame.slot_dict()
@@ -105,6 +121,7 @@ def run_bidirectional_benchmark(seed: int = 16001) -> BidirectionalBenchmarkRepo
         explicit_learning_transfer=float(learn_ok),
         content_firewall=float(firewall_ok),
         visual_experiences_changed=visual_after-visual_before,
+        recombination_accuracy=recombine_ok/max(1,recombine_total),
         dev_parse_accuracy=dev_ok/max(1,dev_total),
         benchmark_role="development_and_architecture_contract_not_blind_final",
         failures=failures,
