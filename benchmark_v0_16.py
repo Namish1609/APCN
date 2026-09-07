@@ -22,5 +22,7 @@ if __name__ == "__main__":
         raise SystemExit("V0.16 generation content-firewall gate failed")
     if report.visual_experiences_changed != 0:
         raise SystemExit("V0.16 modified visual training state")
-    # dev_parse_accuracy is diagnostic only and intentionally has no release
-    # threshold yet; it is not a blind test and must not drive phrase patching.
+    if report.recombination_accuracy < .75:
+        raise SystemExit("V0.16 learned construction recombination gate failed")
+    # dev_parse_accuracy intentionally remains diagnostic only. The original DEV
+    # includes genuinely unseen lexical material and must not be phrase-patched.
