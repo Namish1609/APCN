@@ -136,6 +136,16 @@ class TestV016(unittest.TestCase):
         self.assertGreaterEqual(rep.recombination_accuracy, .75)
         self.assertEqual(rep.benchmark_role, "development_and_architecture_contract_not_blind_final")
 
+    def test_v16_release_metadata(self):
+        version = Path("VERSION").read_text(encoding="utf-8")
+        readme = Path("README.md").read_text(encoding="utf-8")
+        self.assertIn("0.16.0", version)
+        self.assertIn("Bidirectional Semantic Language", version)
+        self.assertIn("APCN V0.16", readme)
+        self.assertIn("semantic responder", readme.lower())
+        self.assertIn("run_desktop_v0_16.py", readme)
+        self.assertEqual(CognitiveSessionV16.VERSION, "0.16.0")
+
     def test_v16_ui_and_launcher_exist(self):
         ui = Path("apcn_v16/ui.py").read_text(encoding="utf-8")
         launcher = Path("run_desktop_v0_16.py").read_text(encoding="utf-8")
