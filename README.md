@@ -1,127 +1,180 @@
-# APCN V0.14 — Language-First Live Cognition
+# APCN V0.16 — Bidirectional Semantic Language
 
-Current release candidate: **0.14.0**.
+Current release candidate: **0.16.0**.
 
-V0.14 keeps the V0.13 persistent world model but changes development priority: most new learning effort now goes into **grounded language construction learning**, while perception remains an active real-world grounding and memory test. The implementation remains non-neural: no backpropagation, gradient descent, trainable neural layers, or pretrained face-embedding model is required.
+APCN is an experimental non-neural cognitive architecture built around persistent concepts, explicit world memory, semantic programs, bounded online learning, and inspectable reasoning. V0.16 follows the V0.15 course correction: language is treated as a **compiler and surface realizer around the concept/world system**, not as the primary knowledge substrate.
 
-## V0.14 architecture
-
-```text
-                         grounded experience
-                                │
-               ┌────────────────┴────────────────┐
-               ▼                                 ▼
-      V0.13 perception/world              V0.14 language-first
-               │                                 │
-   category + instance memory          entity/relation grounding
-   temporal belief / events            + surface constructions
-               │                                 │
-               │                        ProgramConstructionMemory
-               │                                 │
-               └───────────────┬─────────────────┘
-                               ▼
-                    semantic programs + context
-                               │
-                               ▼
-                     persistent cognitive state
-```
-
-Default mixed-learning budget:
+## V0.16 architecture
 
 ```text
-language / semantic constructions   80%
-perception grounding maintenance    20%
+English input
+    ↓
+learned bidirectional constructions
+    ↓
+semantic request frame
+    ↓
+concept / world memory
+    ↓
+explicit reasoning
+    ↓
+semantic answer frame
+    ↓
+the same construction memory
+    ↓
+English surface realization
 ```
 
-The ratio is adjustable in the desktop studio.
+The semantic responder is the truth firewall. The surface generator receives a semantic frame and has **no direct reference to the concept store, fact memory, perception memory, or world model**. It decides how to express an answer, not what is true.
 
-## Language First
+V0.16 remains non-neural: no transformer, external LLM, gradient descent, backpropagation, or trainable neural language model is used.
 
-V0.14 adds a bounded sparse `ProgramConstructionMemory`. It learns reusable mappings from surface constructions onto semantic-program schemas while reusing the language-independent semantic primitives already established in earlier releases.
+## What changed from V0.15
 
-The new procedural language curriculum introduces more varied sentence forms and separate held-out constructions. Testing is read-only: learner episode count is checked before and after held-out evaluation.
+V0.15 established conversational semantic routing over explicit memory and removed the experimental raw-corpus/n-gram language-exposure path. V0.16 adds:
 
-The **Language First** tab supports:
+- an explicit `SemanticFrame` intermediate representation;
+- a bounded `BidirectionalConstructionMemory`;
+- shared constructions for both parsing and generation;
+- multiple surface realizations from one semantic frame;
+- `parse(generate(S))` semantic roundtrip testing;
+- a semantic responder that alone can access concept/fact truth;
+- a compositional request parser that recombines lexical functions learned from TRAIN constructions;
+- conservative generic morphology normalization for ordinary inflections such as `depend/depends`;
+- V0.15 explicit teaching and memory migration;
+- a **Bidirectional Language** desktop lab;
+- a dedicated V0.16 CI/research gate.
 
-- language-only training batches;
-- mixed 80/20 language/perception batches;
-- held-out construction tests with memory frozen;
-- inspection of learned program constructions;
-- explicit human paraphrase teaching without global retraining.
+## Why the language generator is separated from knowledge
 
-This is still controlled semantic-language research, not an open-domain English claim.
+For a semantic answer such as:
 
-## Local desktop camera + self-face experiment
+```text
+STATE_DEFINITION(
+    concept = acceleration,
+    definition = "velocity change divided by time"
+)
+```
 
-V0.14 adds an opt-in **Self Face Camera** tab for testing the user's own face locally.
+V0.16 can realize several stored constructions, for example:
 
-It does **not** use a pretrained neural face embedding encoder. Identity comes from deterministic APCN appearance descriptors plus bounded prototype memory. The optional OpenCV Haar cascade is used only to locate a face rectangle; it has no identity role. You can disable automatic location and use a manual face box for the stricter no-pretrained-detector path.
+```text
+Acceleration is velocity change divided by time.
+Put simply acceleration is velocity change divided by time.
+The stored definition of acceleration is velocity change divided by time.
+I understand acceleration as velocity change divided by time.
+```
 
-Important boundaries:
+The realizer cannot independently add a claim about force, gravity, density, or any other concept unless that information is present in the semantic frame passed to it.
 
-- single local enrolled self identity;
-- no public-person lookup;
-- no demographic inference;
-- not security-grade authentication;
-- raw camera frames and face crops are not saved;
-- bounded compact appearance prototypes only.
+This is the central V0.16 architectural contract:
 
-A recognition system cannot literally operate on pixels with no representation at all. Here, “no encoder” means **no pretrained learned face embedding network**; APCN still computes a deterministic numerical descriptor from the focused pixels, just as V0.13 did for persistent bottles and other objects.
+> **Generation may choose how to say a semantic answer; it may not decide what is true.**
 
-### Recommended webcam test
+## Compositional language test
+
+The first exact construction implementation passed semantic generation/roundtrip tests but scored 0% on an original DEV set containing genuinely unseen lexical material. That result is retained as a limitation rather than patched phrase-by-phrase.
+
+A separate recombination split was frozen before first execution. Its words/semantic cues occur in TRAIN, but their syntax is recombined into new forms. A generic morphology layer normalizes productive inflections without assigning dialogue semantics. This tests a narrower, scientifically defensible question:
+
+> Can APCN recombine linguistic functions it has already learned into unseen syntax?
+
+The release benchmark reports this separately from the original DEV score. Neither is presented as proof of general English competence or LLM-level fluency.
+
+## Persistent teaching
+
+V0.16 keeps V0.15's explicit semantic-memory teaching path. For example:
+
+```text
+fluxion means acceleration
+```
+
+updates lexical-semantic memory immediately. A later request such as:
+
+```text
+what is fluxion
+```
+
+can resolve through the alias into the stored `ACCELERATION` concept without global retraining.
+
+Likewise, explicit facts and supported concept-from-concept definitions remain persistent knowledge rather than dialogue statistics.
+
+## Desktop usage
+
+Windows PowerShell:
+
+```powershell
+cd "D:\HUD Jarvis\APCN"
+git checkout main
+git pull
+.\.venv\Scripts\Activate.ps1
+python run_desktop_v0_16.py
+```
+
+Linux/X11:
 
 ```bash
 cd ~/APCN
-git checkout v0.14-build
+git checkout main
 git pull
 source .venv/bin/activate
 export DISPLAY=:1
 export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_14.py
+python run_desktop_v0_16.py
 ```
 
-Open **Self Face Camera**. Start the camera, auto-locate or manually box your face, freeze useful frames and enroll roughly 8–12 varied views. Then test new frames with **Verify: Is This Me?**. A wrong acceptance can be corrected immediately with **This Is NOT Me**, which adds bounded negative evidence rather than retraining a global model.
+The inherited **Conversation** tab uses the V0.16 semantic path when supported and falls back to the V0.15 conversational compiler for operations V0.16 does not yet represent.
 
-For a physical webcam, run APCN on the desktop machine that owns the camera. A remote Xvfb/noVNC server usually cannot see the local camera unless the device is explicitly forwarded.
+The new **Bidirectional Language** tab lets you:
 
-## Existing World Memory
-
-The inherited V0.13 **World Memory** tab remains available for general objects:
-
-```text
-focused object pixels
-        ↓
-fine instance descriptor
-        ↓
-bounded multi-view memory
-        ↓
-KNOWN / PROBABLE / AMBIGUOUS / NOVEL
-        ↓
-VISIBLE / OCCLUDED / OUT_OF_VIEW / LOST
-        ↓
-trajectory + events + belief-based where()
-```
-
-Raw video is not persisted.
+- parse a sentence into a semantic frame;
+- inspect parser evidence;
+- generate multiple paraphrases from the same frame;
+- run semantic roundtrip checks;
+- inspect the bidirectional construction memory and architecture audit.
 
 ## Testing
 
+Fast V0.16 gate:
+
 ```bash
-python -m unittest tests.test_v0_14 -v
-python benchmark_v0_14.py
-python benchmark_face_v0_14.py
+python -m unittest tests.test_v0_16 -v
+python benchmark_v0_16.py
 ```
 
-The language benchmark measures held-out semantic constructions and direct paraphrase teaching.
+Full project regression:
 
-The face benchmark uses **procedural face-like drawings only** to regression-test compact memory, nuisance robustness, unknown rejection and correction. It is not a real-face accuracy result. Real webcam behavior must be measured locally.
+```bash
+python -m unittest discover -s tests -v
+```
 
-The full GitHub Actions workflow preserves the historical V0.7–V0.13 tests, V0.12 hard perception gate, and V0.13 persistent-instance benchmark.
+The V0.16 benchmark gates:
 
-## Scientific boundary
+- supported semantic request/response accuracy;
+- at least five surface variants for supported answer-frame families;
+- semantic roundtrip preservation;
+- explicit unknown handling;
+- transfer of explicit teaching into V0.16 reasoning;
+- generation content isolation;
+- recombination of learned linguistic functions;
+- zero visual-training changes.
 
-V0.14 is primarily testing whether APCN can move from word/construction cues toward reusable **sentence → semantic-program** structure while retaining grounded persistent world memory. The self-face experiment is a practical stress test of the same bounded instance-memory mechanism, not the central research objective.
+The benchmark explicitly labels itself **development/architecture-contract**, not a blind final English benchmark.
 
-It does not claim large-scale language understanding, unrestricted grammar induction, robust real-world face recognition across all conditions, secure biometric authentication, or open-world visual understanding.
+## Scientific boundaries
 
-Detailed V0.14 notes are in `README_V0_14.md`. Historical release documentation remains in `README_V0_13.md`, `README_V0_12.md`, and earlier version files.
+V0.16 does **not** claim:
+
+- LLM-level natural-language generation;
+- broad open-domain English understanding;
+- internet-scale language learning;
+- autonomous programming ability;
+- general intelligence;
+- superiority to modern neural language models.
+
+It is testing a narrower architectural hypothesis:
+
+> Can a bounded non-neural language system map multiple surface constructions into explicit semantic operations and realize explicit semantic answers back into varied language, while factual knowledge remains in a separate persistent concept/world memory?
+
+That separation is mandatory for future APCN releases. If future product-quality fluency ultimately requires a compact neural surface realizer, it must be evaluated as a separate hybrid product track rather than silently changing the claims of the pure APCN research architecture.
+
+See `V0_15_COURSE_CORRECTION.md` for the language course correction and `V0_16_BIDIRECTIONAL_LANGUAGE.md` for the V0.16 design contract. Historical V0.14/V0.13/V0.12 documentation remains in the repository.
