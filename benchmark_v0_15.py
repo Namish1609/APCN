@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+import json
+
+from apcn_v15.benchmark import run_conversation_benchmark
+
+
+if __name__ == "__main__":
+    report = run_conversation_benchmark()
+    print(json.dumps(report.to_dict(), indent=2))
+    if report.act_accuracy < .85:
+        raise SystemExit("V0.15 smoke act accuracy below gate")
+    if report.required_content_accuracy < .80:
+        raise SystemExit("V0.15 smoke required-content accuracy below gate")
+    # Development split only: useful for regression, not a claim of blind English
+    # generalization. Do not tune individual phrases from this result.
+    if report.dev_dialogue_act_accuracy < .55:
+        raise SystemExit("V0.15 development dialogue accuracy below sanity floor")
+    if report.knowledge_language_separation < 1.0:
+        raise SystemExit("V0.15 language/knowledge separation contract failed")
+    if report.unknown_honesty < 1.0:
+        raise SystemExit("V0.15 unknown-honesty gate failed")
+    if report.learned_memory_accuracy < 1.0:
+        raise SystemExit("V0.15 explicit-learning gate failed")
+    if report.followup_accuracy < .80:
+        raise SystemExit("V0.15 follow-up dialogue gate failed")
+    if report.visual_experiences_changed != 0:
+        raise SystemExit("V0.15 modified visual training state")
