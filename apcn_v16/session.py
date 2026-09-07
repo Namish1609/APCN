@@ -16,7 +16,7 @@ from .compositional import BidirectionalLanguageEngineV161
 
 
 class CognitiveSessionV16(CognitiveSessionV15):
-    VERSION = "0.16.0-dev"
+    VERSION = "0.16.0"
 
     def __init__(self, seed: int = 16):
         super().__init__(seed)
