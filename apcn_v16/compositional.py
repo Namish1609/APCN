@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from typing import DefaultDict, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import DefaultDict, Dict, List, Optional, Sequence, Tuple
 import math
 import re
 
@@ -49,10 +49,10 @@ class CompositionalRequestParserV16:
     """Recombine semantic cues learned from TRAIN constructions.
 
     Exact bidirectional constructions remain the strongest path. This parser is
-    used only when no exact learned construction matches. It derives cue->op
-    evidence from the existing construction memory and resolves semantic slots
-    from explicit known concept/alias names. It does not contain a hand-written
-    word->intent dictionary.
+    used only when no trustworthy exact learned construction matches. It derives
+    cue->operation evidence from the existing construction memory and resolves
+    semantic slots from explicit known concept/alias names. There is no hand-
+    written word->intent dictionary.
     """
 
     STOP = {
@@ -143,7 +143,13 @@ class CompositionalRequestParserV16:
         cue_count = len(evidence[op])
         confidence = min(.91, .48 + .32 * ratio + .08 * min(1.0, cue_count / 2.0))
         ev = [
-            {"mode":"compositional_cue","op":op,"cue":cue,"weight":float(weight)}
+            {
+                "mode":"compositional_cue",
+                "op":op,
+                "cue":cue,
+                "template":f"cue:{cue}",
+                "weight":float(weight),
+            }
             for weight, cue in sorted(evidence[op], reverse=True)[:6]
         ]
         return frame, float(confidence), ev
@@ -166,11 +172,43 @@ class BidirectionalLanguageEngineV161(BidirectionalLanguageEngineV16):
             terms.add(rec.subject); terms.add(rec.object)
         return sorted((normalize_name(x) for x in terms if normalize_name(x)), key=len, reverse=True)
 
+    def _exact_slots_are_resolved(self, frame: SemanticFrame) -> bool:
+        known = set(self._known_terms())
+        if frame.op == "COMPARE":
+            return (frame.get("left") or "") in known and (frame.get("right") or "") in known
+        concept = frame.get("concept") or ""
+        return concept in known
+
+    def _is_explicit_teaching(self, text: str) -> bool:
+        engine = self.fallback_engine
+        if engine is None:
+            return False
+        q = engine._clean(text)
+        if any(pattern.match(q) for pattern in engine.ALIAS_PATTERNS):
+            return True
+        if engine.EXPLICIT_DEFINITION.match(q) or engine.REMEMBER_ISA.match(q):
+            return True
+        if engine._EXEC_DEFINITION_CUES.search(" " + q + " ") and not q.endswith("?"):
+            return True
+        return False
+
     def parse(self, text: str):
         frame, confidence, evidence = self.memory.parse(text, allowed_ops=self.REQUEST_OPS)
-        if frame is not None:
+        # A slot wildcard is not allowed to swallow arbitrary surrounding syntax.
+        # Exact patterns only commit when their captured semantic slots resolve to
+        # explicit known terms; otherwise compositional analysis gets a chance.
+        if frame is not None and self._exact_slots_are_resolved(frame):
             self.last_parse_evidence = evidence
             return frame, confidence, evidence
         frame, confidence, evidence = self.compositional_parser.parse(text, self._known_terms())
         self.last_parse_evidence = evidence
         return frame, confidence, evidence
+
+    def respond(self, text: str):
+        # Teaching changes semantic memory and therefore has priority over request
+        # interpretation. This preserves V0.15's immediate explicit teaching path.
+        if self._is_explicit_teaching(text) and self.fallback_engine is not None:
+            row = self.fallback_engine.respond(text)
+            row.trace.append("v016:explicit_semantic_teaching")
+            return row
+        return super().respond(text)
