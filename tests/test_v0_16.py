@@ -137,13 +137,15 @@ class TestV016(unittest.TestCase):
         self.assertEqual(rep.benchmark_role, "development_and_architecture_contract_not_blind_final")
 
     def test_v16_release_metadata(self):
-        version = Path("VERSION").read_text(encoding="utf-8")
-        readme = Path("README.md").read_text(encoding="utf-8")
-        self.assertIn("0.16.0", version)
-        self.assertIn("Bidirectional Semantic Language", version)
-        self.assertIn("APCN V0.16", readme)
-        self.assertIn("semantic responder", readme.lower())
-        self.assertIn("run_desktop_v0_16.py", readme)
+        # Root VERSION/README belong to the latest release and are expected to
+        # advance. Historical regressions validate the immutable V0.16 release
+        # document, launcher, and class version instead of pinning root metadata.
+        release_doc = Path("V0_16_BIDIRECTIONAL_LANGUAGE.md").read_text(encoding="utf-8")
+        launcher = Path("run_desktop_v0_16.py").read_text(encoding="utf-8")
+        self.assertIn("APCN V0.16", release_doc)
+        self.assertIn("Bidirectional Semantic Language", release_doc)
+        self.assertIn("truth", release_doc.lower())
+        self.assertIn("APCNV16Window", launcher)
         self.assertEqual(CognitiveSessionV16.VERSION, "0.16.0")
 
     def test_v16_ui_and_launcher_exist(self):
