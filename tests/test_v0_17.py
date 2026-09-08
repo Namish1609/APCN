@@ -20,7 +20,6 @@ class TestV017(unittest.TestCase):
         for templates in teacher.RECOMBINATION.values():
             for template in templates:
                 normalized = " ".join(template.lower().replace("{", " { ").replace("}", " } ").split())
-                # Direct template text must not appear as a learned record.
                 self.assertFalse(any(rec.template == normalized for rec in s.operator_memory_v17.records.values()))
         self.assertGreaterEqual(len(retained), 15)
 
@@ -137,13 +136,12 @@ class TestV017(unittest.TestCase):
     def test_ui_launcher_and_release_metadata(self):
         ui = Path("apcn_v17/ui.py").read_text(encoding="utf-8")
         launcher = Path("run_desktop_v0_17.py").read_text(encoding="utf-8")
-        version = Path("VERSION").read_text(encoding="utf-8")
-        readme = Path("README.md").read_text(encoding="utf-8")
+        doc = Path("V0_17_STRUCTURED_DISCOURSE.md").read_text(encoding="utf-8")
         self.assertIn("Structured Semantics", ui)
         self.assertIn("APCNV17Window", launcher)
-        self.assertIn("0.17.0", version)
-        self.assertIn("V0.17", readme)
-        self.assertIn("run_desktop_v0_17.py", readme)
+        self.assertEqual(CognitiveSessionV17.VERSION, "0.17.0")
+        self.assertIn("APCN V0.17", doc)
+        self.assertIn("Structured Discourse Semantics", doc)
 
 
 if __name__ == "__main__":
