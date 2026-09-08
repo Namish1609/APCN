@@ -11,6 +11,7 @@ on:
       - 'VERSION'
       - 'README.md'
       - 'V0_18_NATURAL_CONVERSATION.md'
+      - 'V0_18_ONLINE_CONCEPT_LEARNING.md'
       - '.github/workflows/v0_18_fast.yml'
   workflow_dispatch:
 
@@ -32,5 +33,5 @@ jobs:
           python -m py_compile run_desktop_v0_18.py benchmark_v0_18.py
       - name: V0.18 tests
         run: python -m unittest tests.test_v0_18 -v
-      - name: V0.18 transcript regression
+      - name: V0.18 transcript and concept-learning regression
         run: python benchmark_v0_18.py
