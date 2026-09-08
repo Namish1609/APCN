@@ -191,7 +191,7 @@ class TestV018(unittest.TestCase):
         readme = Path("README.md").read_text(encoding="utf-8")
         self.assertIn("Conversation Quality", ui)
         self.assertIn("APCNV18Window", launcher)
-        self.assertIn("0.18.0", version)
+        self.assertRegex(version.splitlines()[0], r"^\d+\.\d+\.\d+$")
         self.assertIn("V0.18", readme)
         self.assertIn("run_desktop_v0_18.py", readme)
 

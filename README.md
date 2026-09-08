@@ -1,73 +1,74 @@
-# APCN V0.18 — Natural Semantic Conversation
+# APCN V0.19 — Online English + Arithmetic
 
-Current release: **0.18.0**.
+Current release candidate: **0.19.0**.
 
-APCN is an experimental non-neural cognitive architecture built around persistent concepts, explicit world/semantic memory, bounded online learning, inspectable reasoning, and a language layer that compiles to and realizes explicit meaning.
+APCN V0.19 deliberately pauses world-model expansion. The immediate goal is to make the language core useful and falsifiable before reconnecting it to a richer world model.
 
-V0.18 fixes the conversation-integration failures exposed by real V0.17 desktop use and begins the planned natural-generation phase.
+The V0.19 question is:
+
+> Can APCN learn English arithmetic constructions online and generalize addition/subtraction to unseen numbers and newly taught words without backpropagation, gradient descent, an external LLM, or a pretrained language model?
 
 ```text
-English
-  ↓
-semantic compiler
-  ↓
-SemanticClause
-  ↓
-concept/world + structured semantic memory
-  ↓
-transparent reasoning / proof
-  ↓
-AnswerPlanV18
-  ║
-  ║ truth firewall
-  ▼
-bounded natural realizer
-  ↓
-English
+English arithmetic request
+        ↓
+learned construction evidence
+        ↓
+operation hypothesis
+  ADD / SUB / reverse SUB
+        ↓
+explicit arithmetic execution
+        ↓
+natural answer
 ```
 
-The surface realizer does **not** receive the truth memory, concept store, world state, or perception memory. It can choose how to say an authorized answer; it cannot decide what is true.
+The arithmetic words themselves are not direct parser branches such as `if word == "plus": add`. A compact bootstrap curriculum is fed through the same online demonstration learner used for later teaching.
 
-## What V0.18 fixes
+## What V0.19 can currently do
 
-- ordinary `is Milo active?` now queries structured `PROPERTY` memory;
-- ordinary `is Milo a cat?` now queries structured `IS_A` memory;
-- `is Milo a creature?` can use universal category inference;
-- `why?` follows the proof for the immediately previous answer;
-- `what do you know about Milo?` aggregates structured entity facts;
-- standard `<cause> causes <effect>` is parsed compositionally;
-- `PROPERTY` is no longer mirrored into the legacy `is_a` fact store;
-- unknown near-miss vocabulary can trigger a suggestion without auto-learning;
-- inherited concept/query/language bindings are reconciled to one canonical `ConceptStore`;
-- V0.18 adds bounded semantic answer-plan → English realization constructions.
-
-Example:
+Examples from the finite CI gate:
 
 ```text
-YOU: remember that milo is a cat
-APCN: Stored as explicit semantic memory: Milo is a cat.
+YOU: what is 37 plus 58?
+APCN: 37 + 58 = 95.
 
-YOU: remember that milo is active
-APCN: Stored as explicit semantic memory: Milo is active.
+YOU: calculate 80 minus 13
+APCN: 80 - 13 = 67.
 
-YOU: is milo active?
-APCN: Yes. Milo is active.
+YOU: subtract 7 from 30
+APCN: 30 - 7 = 23.
 
-YOU: remember that every cat is a creature
-APCN: Stored as explicit semantic memory: Every cat is a creature.
-
-YOU: is milo a creature?
-APCN: Yes. Milo is a creature. I can derive that because Milo is a cat, and every cat is a creature.
-
-YOU: why?
-APCN: Because Milo is a cat, and every cat is a creature.
+YOU: what is seven plus five
+APCN: 7 + 5 = 12.
 ```
 
-Unknown remains explicit:
+It can also learn a new arithmetic word from one demonstration:
 
 ```text
-YOU: is zorbin a creature?
-APCN: I don't know whether Zorbin is a creature yet. I have no explicit fact or rule that establishes it.
+YOU: what is 11 dax 8?
+APCN: I can see two numbers, but I have not learned enough English evidence to identify the requested operation.
+
+YOU: remember that 2 dax 3 equals 5
+APCN: Learned that construction from the example. Its current arithmetic meaning is add.
+
+YOU: what is 11 dax 8?
+APCN: 11 + 8 = 19.
+```
+
+Subtraction can be learned the same way:
+
+```text
+YOU: remember that 9 nerk 4 equals 5
+APCN: Learned that construction from the example. Its current arithmetic meaning is sub.
+
+YOU: please calculate 20 nerk 7
+APCN: 20 - 7 = 13.
+```
+
+Unknown wording remains explicit:
+
+```text
+YOU: what is 9 florp 2?
+APCN: I can see two numbers, but I have not learned enough English evidence to identify the requested operation.
 ```
 
 ## Desktop
@@ -76,42 +77,103 @@ Windows PowerShell:
 
 ```powershell
 cd "D:\HUD Jarvis\APCN"
-git checkout main
+git checkout v0.19-language-math
 git pull
 .\.venv\Scripts\Activate.ps1
+python run_desktop_v0_19.py
+```
+
+For a fresh environment:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python run_desktop_v0_19.py
+```
+
+The V0.19 desktop is intentionally focused. It shows whether memory came from a **LOADED CHECKPOINT** or a **CLEAN IN-MEMORY SESSION**, provides a **Start Clean Test Session** button that does not delete the saved checkpoint, and keeps the main interaction in one chat window.
+
+## Finite V0.19 gate
+
+Run:
+
+```bash
+python -m unittest tests.test_v0_19 -v
+python benchmark_v0_19.py
+```
+
+The gate requires 100% on:
+
+- unseen-number addition;
+- unseen-number subtraction;
+- English wrapper/operator recombination;
+- reverse-order subtraction constructions;
+- basic written number words;
+- one-shot invented addition-word learning;
+- one-shot invented subtraction-word learning;
+- unknown-operator honesty;
+- persistence of newly learned arithmetic language;
+- V0.18 semantic fallback compatibility;
+- no-backprop/no-external-model architecture checks.
+
+See `V0_19_LANGUAGE_MATH.md` for the architecture and scientific boundary.
+
+## What remains from V0.18
+
+V0.19 inherits the V0.18 semantic conversation system as a fallback for non-arithmetic language. V0.18 provides:
+
+- structured `PROPERTY` and `IS_A` truth queries;
+- universal category inference;
+- proof-aware `why?`;
+- entity fact aggregation;
+- causal, conditional, and temporal retrieval;
+- explicit concept identity such as `fluxion -> acceleration`;
+- bounded online prototype memory that is not truth authority;
+- bounded answer-plan → English realization.
+
+The older desktop remains available:
+
+```bash
 python run_desktop_v0_18.py
 ```
 
-Linux/X11:
+V0.18 example:
 
-```bash
-cd ~/APCN
-git checkout main
-git pull
-source .venv/bin/activate
-export DISPLAY=:1
-export QT_QPA_PLATFORM=xcb
-python run_desktop_v0_18.py
+```text
+YOU: remember that milo is a cat
+APCN: Stored as explicit semantic memory: Milo is a cat.
+
+YOU: remember that every cat is a creature
+APCN: Stored as explicit semantic memory: Every cat is a creature.
+
+YOU: is milo a creature?
+APCN: Yes. Milo is a creature. I can derive that because Milo is a cat, and every cat is a creature.
 ```
-
-Use **Conversation** as the main interface. **Conversation Quality** shows the V0.18 architecture audit and the real desktop regression sequence.
-
-## Testing
-
-```bash
-python -m unittest tests.test_v0_18 -v
-python benchmark_v0_18.py
-python -m unittest discover -s tests -v
-```
-
-The V0.18 benchmark is a **desktop transcript regression and architecture gate, not a blind general-English benchmark**.
 
 ## Scientific boundary
 
-V0.18 does not claim LLM-level fluency, broad commonsense, programming ability, or superiority to modern neural language models. It tests a narrower question:
+V0.19 is **not** a claim of LLM-level English competence. It is a finite first language milestone. Passing it proves that APCN can acquire and reuse a narrow class of English arithmetic constructions online without backpropagation.
 
-> Can ordinary conversational English be routed into explicit semantic memory and transparent reasoning, then expressed naturally enough through a bounded truth-isolated realization system?
+The intended progression is now language-first:
 
-No external LLM, transformer, gradient descent, backpropagation, or neural language model is used in the V0.18 language path.
+```text
+addition/subtraction
+        ↓
+multiplication/division
+        ↓
+comparison + variables
+        ↓
+multi-step arithmetic
+        ↓
+broader sentence semantics
+        ↓
+paraphrase/general English benchmarks
+        ↓
+reconnect the mature language core to the world model
+```
 
-See `V0_15_COURSE_CORRECTION.md`, `V0_16_BIDIRECTIONAL_LANGUAGE.md`, `V0_17_STRUCTURED_DISCOURSE.md`, and `V0_18_NATURAL_CONVERSATION.md`.
+This avoids spending indefinite effort on world-model plumbing while the core language capability remains brittle.
+
+Historical architecture notes remain in `V0_15_COURSE_CORRECTION.md`, `V0_16_BIDIRECTIONAL_LANGUAGE.md`, `V0_17_STRUCTURED_DISCOURSE.md`, `V0_18_NATURAL_CONVERSATION.md`, and `V0_18_ONLINE_CONCEPT_LEARNING.md`.

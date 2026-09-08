@@ -1,0 +1,30 @@
+name: APCN V0.19 fast gate
+
+on:
+  pull_request:
+    paths:
+      - "apcn_v19/**"
+      - "tests/test_v0_19.py"
+      - "benchmark_v0_19.py"
+      - "run_desktop_v0_19.py"
+      - "V0_19_LANGUAGE_MATH.md"
+      - "VERSION"
+      - ".github/workflows/v0_19_fast.yml"
+  workflow_dispatch:
+
+jobs:
+  v019-language-math:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile V0.19
+        run: python -m compileall -q apcn_v19 benchmark_v0_19.py run_desktop_v0_19.py
+      - name: V0.19 unit tests
+        run: python -m unittest tests.test_v0_19 -v
+      - name: V0.19 finite language and arithmetic gate
+        run: python benchmark_v0_19.py
