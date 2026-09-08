@@ -15,6 +15,7 @@ class TestV018(unittest.TestCase):
             s.concepts.add_primitive(name, grounded=True)
         s.concepts.learn_definition("acceleration is velocity change divided by time")
         s.v18_binding_repairs = s._repair_knowledge_bindings()
+        s._seed_online_prototypes_from_concepts()
         s._rebuild_v18_language()
         return s
 
@@ -39,6 +40,32 @@ class TestV018(unittest.TestCase):
         self.assertEqual(first.act, "ANSWER_DEFINITION")
         self.assertIn("velocity change", first.text.lower())
         self.assertIn("time", first.text.lower())
+        self.assertEqual(s.concept_bindings_v18.resolve("fluxion"), "acceleration")
+
+    def test_alias_identity_transfers_structured_truth_without_fact_copy(self):
+        s = self._session()
+        s.talk("fluxion means acceleration")
+        s.talk("remember that acceleration is active")
+        row = s.talk("is fluxion active?")
+        self.assertEqual(row.act, "ANSWER_TRUE")
+        self.assertTrue(any("concept_identity:canonicalized_surface" in x for x in row.trace))
+        subjects = {
+            rec.clause.get("subject")
+            for rec in s.semantic_memory_v17.records.values()
+            if rec.clause.op == "PROPERTY"
+        }
+        self.assertIn("acceleration", subjects)
+        self.assertNotIn("fluxion", subjects)
+
+    def test_online_prototype_alias_identity_is_not_truth_authority(self):
+        s = self._session()
+        s.talk("fluxion means acceleration")
+        self.assertGreater(s.concept_similarity("fluxion", "acceleration"), .999999)
+        audit = s.v18_memory_audit()
+        self.assertFalse(audit["architecture_contract"]["online_prototypes_are_truth_authority"])
+        self.assertFalse(audit["architecture_contract"]["online_prototypes_use_pretrained_embeddings"])
+        self.assertFalse(hasattr(s.online_prototypes_v18, "infer_truth"))
+        self.assertFalse(hasattr(s.online_prototypes_v18, "semantic_memory"))
 
     def test_unknown_near_alias_offers_clarification_not_silent_binding(self):
         s = self._session()
@@ -48,6 +75,7 @@ class TestV018(unittest.TestCase):
         self.assertIn("did you mean", row.text.lower())
         self.assertIn("fluxion", row.text.lower())
         self.assertNotIn("fluxation", s.lexicon_v15.aliases)
+        self.assertNotIn("fluxation", s.concept_bindings_v18.bindings)
 
     def test_ordinary_property_and_isa_questions_use_structured_truth(self):
         s = self._session()
@@ -116,23 +144,30 @@ class TestV018(unittest.TestCase):
         self.assertFalse(hasattr(s.natural_realizer_v18, "world"))
         self.assertFalse(s.v18_memory_audit()["architecture_contract"]["surface_realizer_has_truth_memory_reference"])
 
-    def test_persistence_keeps_semantics_not_raw_chat(self):
+    def test_persistence_keeps_semantics_concept_identity_and_prototypes_not_raw_chat(self):
         s = self._session()
-        s.talk("remember that milo is active")
-        s.talk("is milo active?")
+        s.talk("fluxion means acceleration")
+        s.talk("remember that acceleration is active")
+        s.talk("is fluxion active?")
         with tempfile.TemporaryDirectory() as td:
             s.save(td)
             restored = CognitiveSessionV18.load_checkpoint(td, seed=18011)
-            row = restored.talk("is milo active?")
+            row = restored.talk("is fluxion active?")
             self.assertEqual(row.act, "ANSWER_TRUE")
+            self.assertEqual(restored.concept_bindings_v18.resolve("fluxion"), "acceleration")
+            self.assertGreater(restored.concept_similarity("fluxion", "acceleration"), .999999)
+            self.assertTrue(Path(td, "concept_bindings_v0_18.json").exists())
+            self.assertTrue(Path(td, "online_prototypes_v0_18.json").exists())
             state = Path(td, "session_v0_18.json").read_text(encoding="utf-8").lower()
-            self.assertNotIn("remember that milo is active", state)
-            self.assertNotIn("is milo active", state)
+            self.assertNotIn("remember that acceleration is active", state)
+            self.assertNotIn("is fluxion active", state)
 
     def test_benchmark_transcript_regression_contract(self):
         rep = run_natural_conversation_benchmark(seed=18012)
         self.assertEqual(rep.immediate_alias_accuracy, 1.0)
         self.assertEqual(rep.lexical_repair_accuracy, 1.0)
+        self.assertEqual(rep.concept_identity_transfer_accuracy, 1.0)
+        self.assertEqual(rep.prototype_alias_identity, 1.0)
         self.assertEqual(rep.ordinary_property_truth_accuracy, 1.0)
         self.assertEqual(rep.ordinary_isa_truth_accuracy, 1.0)
         self.assertEqual(rep.about_aggregation_accuracy, 1.0)
@@ -145,6 +180,7 @@ class TestV018(unittest.TestCase):
         self.assertEqual(rep.property_category_separation, 1.0)
         self.assertGreaterEqual(rep.natural_realization_min_variants, 3)
         self.assertEqual(rep.content_firewall, 1.0)
+        self.assertEqual(rep.prototype_truth_firewall, 1.0)
         self.assertEqual(rep.visual_experiences_changed, 0)
         self.assertIn("not_blind", rep.benchmark_role)
 
