@@ -11,6 +11,8 @@ from .session import CognitiveSessionV18
 class NaturalConversationBenchmarkV18:
     immediate_alias_accuracy: float
     lexical_repair_accuracy: float
+    concept_identity_transfer_accuracy: float
+    prototype_alias_identity: float
     ordinary_property_truth_accuracy: float
     ordinary_isa_truth_accuracy: float
     about_aggregation_accuracy: float
@@ -23,6 +25,7 @@ class NaturalConversationBenchmarkV18:
     property_category_separation: float
     natural_realization_min_variants: int
     content_firewall: float
+    prototype_truth_firewall: float
     visual_experiences_changed: int
     benchmark_role: str
 
@@ -35,6 +38,7 @@ def _seed_definition_knowledge(s: CognitiveSessionV18) -> None:
         s.concepts.add_primitive(name, grounded=True)
     s.concepts.learn_definition("acceleration is velocity change divided by time")
     s.v18_binding_repairs = s._repair_knowledge_bindings()
+    s._seed_online_prototypes_from_concepts()
     s._rebuild_v18_language()
 
 
@@ -49,6 +53,16 @@ def run_natural_conversation_benchmark(seed: int = 18012) -> NaturalConversation
 
     repair = s.talk("I asked what is Fluxation")
     lexical_repair = int(repair.act == "CLARIFY" and "fluxion" in repair.text.lower() and "did you mean" in repair.text.lower())
+
+    # Concept-transfer gate: alias identity is applied before structured truth.
+    # No duplicate semantic fact is copied into a separate alias bucket.
+    s.talk("remember that acceleration is active")
+    transferred = s.talk("is fluxion active?")
+    concept_transfer = int(
+        transferred.act == "ANSWER_TRUE"
+        and any("concept_identity:canonicalized_surface" in str(x) for x in transferred.trace)
+    )
+    prototype_identity = int(s.concept_similarity("fluxion", "acceleration") > .999999)
 
     s.talk("remember that milo is a cat")
     s.talk("remember that milo is active")
@@ -89,11 +103,20 @@ def run_natural_conversation_benchmark(seed: int = 18012) -> NaturalConversation
 
     realizer = s.natural_realizer_v18
     firewall = int(not hasattr(realizer, "semantic_memory") and not hasattr(realizer, "concepts") and not hasattr(realizer, "world") and not hasattr(realizer.memory, "semantic_memory") and not hasattr(realizer.memory, "concepts") and not hasattr(realizer.memory, "world"))
+    prototypes = s.online_prototypes_v18
+    prototype_firewall = int(
+        prototypes.summary()["truth_authority"] is False
+        and not hasattr(prototypes, "semantic_memory")
+        and not hasattr(prototypes, "infer_truth")
+        and not hasattr(prototypes, "world")
+    )
 
     visual_after = s.visual.learner.episode_count
     return NaturalConversationBenchmarkV18(
         immediate_alias_accuracy=float(immediate_alias),
         lexical_repair_accuracy=float(lexical_repair),
+        concept_identity_transfer_accuracy=float(concept_transfer),
+        prototype_alias_identity=float(prototype_identity),
         ordinary_property_truth_accuracy=float(ordinary_prop),
         ordinary_isa_truth_accuracy=float(ordinary_isa),
         about_aggregation_accuracy=float(about_ok),
@@ -106,6 +129,7 @@ def run_natural_conversation_benchmark(seed: int = 18012) -> NaturalConversation
         property_category_separation=float(category_separation),
         natural_realization_min_variants=len(variants),
         content_firewall=float(firewall),
+        prototype_truth_firewall=float(prototype_firewall),
         visual_experiences_changed=visual_after - visual_before,
-        benchmark_role="desktop_transcript_regression_and_architecture_gate_not_blind_general_english",
+        benchmark_role="desktop_transcript_regression_plus_online_concept_learning_gate_not_blind_general_english",
     )
